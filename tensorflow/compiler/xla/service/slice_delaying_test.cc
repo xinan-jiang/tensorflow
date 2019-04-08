@@ -1,4 +1,4 @@
-/* Copyright 2017 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2019 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,6 +22,8 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/hlo_module.h"
 #include "tensorflow/compiler/xla/service/hlo_opcode.h"
+#include "tensorflow/compiler/xla/service/pattern_matcher.h"
+#include "tensorflow/compiler/xla/service/pattern_matcher_gmock.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/tests/hlo_test_base.h"
 #include "tensorflow/compiler/xla/tests/literal_test_util.h"
@@ -31,55 +33,45 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 
 namespace xla {
+namespace {
+
+using ::testing::ElementsAre;
+namespace m = match;
 
 class SliceDelayingTest : public HloTestBase {
- protected:
-  SliceDelayingTest() {}
 };
 
 TEST_F(SliceDelayingTest, Basic) {
-  // Verify that no dead code is removed from a computation with no dead code.
-  auto builder = HloComputation::Builder(TestName());
-  Shape param_shape = ShapeUtil::MakeShape(F32, {20, 10});
-  auto param_0 = builder.AddInstruction(HloInstruction::CreateParameter(
-      0, param_shape, "param_0"));
-  auto param_1 = builder.AddInstruction(HloInstruction::CreateParameter(
-      1, param_shape, "param_1"));
-  Shape slice_shape_0 = ShapeUtil::MakeShape(F32, {12, 10});
-  Shape slice_shape_1 = ShapeUtil::MakeShape(F32, {8, 10});
-  auto slice_00 = builder.AddInstruction(
-      HloInstruction::CreateSlice(slice_shape_0, param_0,
-      /*start_indices=*/{0, 0}, /*limit_indices=*/{12, 10},
-      /*strides=*/{1, 1}));
-  auto slice_01 = builder.AddInstruction(
-      HloInstruction::CreateSlice(slice_shape_1, param_0,
-      /*start_indices=*/{12, 0}, /*limit_indices=*/{20, 10},
-      /*strides=*/{1, 1}));
-  auto slice_10 = builder.AddInstruction(
-      HloInstruction::CreateSlice(slice_shape_0, param_1,
-      /*start_indices=*/{0, 0}, /*limit_indices=*/{12, 10},
-      /*strides=*/{1, 1}));
-  auto slice_11 = builder.AddInstruction(
-      HloInstruction::CreateSlice(slice_shape_1, param_1,
-      /*start_indices=*/{12, 0}, /*limit_indices=*/{20, 10},
-      /*strides=*/{1, 1}));
-  auto add_0 = builder.AddInstruction(HloInstruction::CreateBinary(
-      slice_shape_0, HloOpcode::kAdd, slice_00, slice_10));
-  auto add_1 = builder.AddInstruction(HloInstruction::CreateBinary(
-      slice_shape_1, HloOpcode::kAdd, slice_01, slice_11));
-  builder.AddInstruction(HloInstruction::CreateTuple({add_0, add_1}));
-
-  auto module = CreateNewVerifiedModule();
-  auto computation = module->AddEntryComputation(builder.Build());
-
-  EXPECT_EQ(9, computation->instruction_count());
-
+  const char* kModuleStr = R"(
+    HloModule m
+    test {
+      p0 = f32[8,8] parameter(0)
+      p1 = f32[8,8] parameter(1)
+      s00 = f32[2,8] slice(f32[8,8] p0), slice={[0:2], [0:8]}
+      s01 = f32[6,8] slice(f32[8,8] p0), slice={[2:8], [0:8]}
+      s10 = f32[2,8] slice(f32[8,8] p1), slice={[0:2], [0:8]}
+      s11 = f32[6,8] slice(f32[8,8] p1), slice={[2:8], [0:8]}
+      add0 = f32[2,8] add(f32[2,8] s00, f32[2,8] s10)
+      add1 = f32[6,8] add(f32[6,8] s01, f32[6,8] s11)
+      ROOT tuple = (f32[2,8], f32[6,8]) tuple(add0, add1)
+    }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(kModuleStr));
+  EXPECT_EQ(9, module->entry_computation()->instruction_count());
   SliceDelaying slice_delaying;
-  EXPECT_TRUE(slice_delaying.Run(module.get()).ValueOrDie());
+  TF_ASSERT_OK_AND_ASSIGN(bool result,
+                          RunHloPass(&slice_delaying, module.get()));
+  EXPECT_TRUE(result);
   HloDCE dce;
-  EXPECT_TRUE(dce.Run(module.get()).ValueOrDie());
-
-  EXPECT_EQ(6, computation->instruction_count());
+  TF_ASSERT_OK_AND_ASSIGN(result,
+                          RunHloPass(&dce, module.get()));
+  EXPECT_TRUE(result);
+  EXPECT_EQ(6, module->entry_computation()->instruction_count());
+  EXPECT_THAT(module->entry_computation()->root_instruction(),
+      GmockMatch(m::Tuple(m::Slice(m::Add(m::Parameter(0), m::Parameter(1))),
+          m::Slice(m::Add(m::Parameter(0), m::Parameter(1))))));
 }
 
+}  // namespace
 }  // namespace xla

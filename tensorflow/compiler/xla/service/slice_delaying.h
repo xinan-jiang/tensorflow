@@ -21,6 +21,7 @@ limitations under the License.
 #include <vector>
 
 #include "tensorflow/compiler/xla/service/hlo_pass_interface.h"
+#include "absl/container/flat_hash_map.h"
 
 namespace xla {
 
@@ -31,27 +32,6 @@ class SliceDelaying: public HloModulePass {
   tensorflow::StringPiece name() const override { return "slice delaying"; }
 
   StatusOr<bool> Run(HloModule* module) override;
-
- private:
-  using ConstInstructionVector = std::vector<const HloInstruction*>;
-
-  bool CheckSlice(const HloInstruction* inst);
-  int  SplitDim(const HloInstruction* inst, const HloInstruction* slice);
-  bool CheckContinuous(const ConstInstructionVector& slices, int dim);
-  bool SplitSlices(const HloInstruction* inst, int dim,
-           const ConstInstructionVector& slices);
-  bool BundleSlices(const HloInstruction* inst);
-
-  bool IsSplitSlice(const HloInstruction* operand, const HloInstruction* slice);
-  const HloInstruction* GetSlice(const HloInstruction* operand, int i);
-  bool CheckPattern(const std::vector< HloInstruction*>& operands,
-      const std::vector<HloInstruction*>& users);
-  void GenerateNewOp(const std::vector<HloInstruction*>& operands,
-      const std::vector<HloInstruction*>& users);
-  bool Merge(const HloInstruction* inst);
-
-  std::map<const HloInstruction*, ConstInstructionVector> split_slices_;
-  std::set<HloInstruction*> to_remove_;
 };
 
 }  // namespace xla

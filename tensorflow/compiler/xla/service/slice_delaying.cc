@@ -1,4 +1,4 @@
-/* Copyright 2017 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2019 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,40 +19,52 @@ limitations under the License.
 
 namespace xla {
 
-bool SliceLess(const HloInstruction* lhs, const HloInstruction* rhs) {
-  int64 l = 0;
-  int64 r = 0;
-  for (int i = 0; i < lhs->slice_starts().size(); ++i) {
-    l = lhs->slice_starts(i);
-    r = rhs->slice_starts(i);
-    if (l < r)
-      return true;
-    if (l > r)
-      return false;
-  }
-  return false;
+namespace {
+
+using ConstInstructionVector = std::vector<const HloInstruction*>;
+
+class SliceDelayer {
+ public:
+  bool Run(HloComputation* computation);
+
+ private:
+  bool BundleSlices(const HloInstruction* inst);
+
+  bool IsSplitSlice(const HloInstruction* operand, const HloInstruction* slice);
+
+  const HloInstruction* GetSlice(const HloInstruction* operand, int64 i);
+
+  bool CheckPattern(const std::vector< HloInstruction*>& operands,
+      const std::vector<HloInstruction*>& users);
+
+  void GenerateNewOp(const std::vector<HloInstruction*>& operands,
+      const std::vector<HloInstruction*>& users);
+
+  bool Merge(const HloInstruction* inst);
+
+  absl::flat_hash_map<const HloInstruction*,
+                      ConstInstructionVector> split_slices_;
+
+  std::set<HloInstruction*> to_remove_;
+};
+
+bool IsUnstridedSlice(const HloInstruction* inst) {
+  return inst->opcode() == HloOpcode::kSlice &&
+      absl::c_all_of(inst->slice_strides(),
+                     [](int64 stride) { return stride == 1; });
 }
 
-bool SliceDelaying::CheckSlice(const HloInstruction* inst) {
-  if (inst->opcode() != HloOpcode::kSlice)
-    return false;
-  for (int64 i : inst->slice_strides())
-    if (i != 1)
-      return false;
-  return true;
-}
-
-// Only support split one dimension
-int SliceDelaying::SplitDim(const HloInstruction* inst,
-                            const HloInstruction* slice) {
+int64 GetSplitedDim(const HloInstruction* inst, const HloInstruction* slice) {
   const Shape shape = inst->shape();
   const Shape slice_shape = slice->shape();
-  int slice_dimension = -1;
   if (ShapeUtil::TrueRank(shape) != ShapeUtil::TrueRank(slice_shape))
     return -1;
-  for (int i = 0; i < ShapeUtil::TrueRank(shape); ++i) {
+
+  int64 slice_dimension = -1;
+  for (int64 i = 0; i < ShapeUtil::TrueRank(shape); ++i) {
     if (shape.dimensions(i) == slice_shape.dimensions(i))
       continue;
+    // more then one dimension
     if (slice_dimension != -1)
       return -1;
     slice_dimension = i;
@@ -60,78 +72,68 @@ int SliceDelaying::SplitDim(const HloInstruction* inst,
   return slice_dimension;
 }
 
-bool SliceDelaying::CheckContinuous(
-    const ConstInstructionVector& slices, int dim) {
+bool CheckContinuous(const ConstInstructionVector& slices, int64 dim) {
   int64 k = slices[0]->slice_limits(dim);
   for (int64 i = 1; i < slices.size(); ++i) {
-    if (slices[i]->slice_starts(dim) != k)
+    if (slices[i]->slice_starts(dim) != k) {
       return false;
+    }
     k = slices[i]->slice_limits(dim);
   }
   return true;
 }
 
-bool SliceDelaying::SplitSlices(const HloInstruction* inst, int dim,
+bool IsSplitSlices(const HloInstruction* inst, int64 dim,
     const ConstInstructionVector& slices) {
   if (!CheckContinuous(slices, dim))
     return false;
-  const HloInstruction* first = *(slices.begin());
-  const HloInstruction* last = *(slices.rbegin());
+  const HloInstruction* first = slices.front();
+  const HloInstruction* last = slices.back();
   if (last->slice_limits(dim) != inst->shape().dimensions(dim)
       || first->slice_starts(dim) != 0) {
     // TODO(xinan): support partially split
     return false;
   }
 
-  split_slices_.insert(
-    std::pair<const HloInstruction*, ConstInstructionVector>
-    (inst, slices));
   return true;
 }
 
-bool SliceDelaying::BundleSlices(const HloInstruction* inst) {
+}  // namespace
+
+bool SliceDelayer::BundleSlices(const HloInstruction* inst) {
   auto iter = split_slices_.find(inst);
   if (iter != split_slices_.end())
     return false;
-
-  ConstInstructionVector slices;
+  std::map<int64, ConstInstructionVector> dim_slices;
   for (auto user : inst->users()) {
-    if (!CheckSlice(user))
+    if (!IsUnstridedSlice(user))
       continue;
-    slices.push_back(user);
-  }
-  if (slices.size() < 2)
-    return false;
-
-  VLOG(1) << "BundleSlices: " << inst->ToString();
-  for (int i = 0; i < slices.size(); ++i) {
-    VLOG(1) << "BundleSlices: Slice[" << i << "]: " << slices[i]->ToString();
-  }
-
-  std::map<int, ConstInstructionVector> dim_slices;
-  for (const HloInstruction* slice : slices) {
-    int dim = SplitDim(inst, slice);
+    int64 dim = GetSplitedDim(inst, user);
     if (dim == -1)
       continue;
-    dim_slices[dim].push_back(slice);
+    dim_slices[dim].push_back(user);
   }
 
-  int split_dim = -1;
   for (auto pair : dim_slices) {
-    int dim = pair.first;
+    int64 dim = pair.first;
     ConstInstructionVector& vec = pair.second;
     if (vec.size() < 2)
       continue;
-    std::sort(vec.begin(), vec.end(), SliceLess);
-    if (SplitSlices(inst, dim, vec)) {
+    std::sort(vec.begin(), vec.end(),
+              [](const HloInstruction* lhs, const HloInstruction* rhs) {
+                return lhs->slice_starts() < rhs->slice_starts();
+              });
+    if (IsSplitSlices(inst, dim, vec)) {
+      split_slices_.insert(std::make_pair(inst, vec));
       // TODO(xinan): keep more splits for a struction
       return true;
     }
   }
+
   return false;
 }
 
-bool SliceDelaying::IsSplitSlice(
+bool SliceDelayer::IsSplitSlice(
     const HloInstruction* operand, const HloInstruction* slice) {
   auto iter_m = split_slices_.find(operand);
   if (split_slices_.end() == iter_m)
@@ -144,21 +146,21 @@ bool SliceDelaying::IsSplitSlice(
   return true;
 }
 
-const HloInstruction* SliceDelaying::GetSlice(
-    const HloInstruction* operand, int i) {
+const HloInstruction* SliceDelayer::GetSlice(
+    const HloInstruction* operand, int64 i) {
   return split_slices_.find(operand)->second[i];
 }
 
-bool SliceDelaying::CheckPattern(const std::vector< HloInstruction*>& operands,
+bool SliceDelayer::CheckPattern(const std::vector< HloInstruction*>& operands,
     const std::vector<HloInstruction*>& users) {
-  for (int i = 0; i < operands.size(); ++i) {
+  for (int64 i = 0; i < operands.size(); ++i) {
     VLOG(1) << "CheckPattern: ops[" << i << "]: " << operands[i]->ToString();
   }
-  for (int i = 0; i < users.size(); ++i) {
+  for (int64 i = 0; i < users.size(); ++i) {
     VLOG(1) << "CheckPattern: users[" << i << "]: " << users[i]->ToString();
   }
   const Shape shape = operands[0]->shape();
-  int split_size = users.size();
+  int64 split_size = users.size();
   for (const HloInstruction* operand : operands) {
     // Only support element-wise now
     if (!ShapeUtil::Equal(operand->shape(), shape))
@@ -168,14 +170,14 @@ bool SliceDelaying::CheckPattern(const std::vector< HloInstruction*>& operands,
   }
   const HloInstruction* split_op = nullptr;
   HloOpcode op = users[0]->opcode();
-  int operand_num = operands.size();
-  for (int i = 0; i < split_size; ++i) {
+  int64 operand_num = operands.size();
+  for (int64 i = 0; i < split_size; ++i) {
     if (users[i]->opcode() != op)
       return false;
     if (users[i]->operand_count() != operand_num)
       return false;
     const Shape split_shape = users[i]->shape();
-    for (int j = 0; j < operands.size(); ++j) {
+    for (int64 j = 0; j < operands.size(); ++j) {
       const HloInstruction* operand = operands[j];
       split_op = GetSlice(operand, i);
       // Only support element-wise now
@@ -193,7 +195,7 @@ bool SliceDelaying::CheckPattern(const std::vector< HloInstruction*>& operands,
   return true;
 }
 
-void SliceDelaying::GenerateNewOp(const std::vector<HloInstruction*>& operands,
+void SliceDelayer::GenerateNewOp(const std::vector<HloInstruction*>& operands,
     const std::vector<HloInstruction*>& users) {
   // generate new ops
   const Shape shape = operands[0]->shape();
@@ -203,7 +205,7 @@ void SliceDelaying::GenerateNewOp(const std::vector<HloInstruction*>& operands,
   VLOG(1) << "Add NewOp: " << new_op->ToString();
 
   ConstInstructionVector slices;
-  for (int i = 0; i < users.size(); ++i) {
+  for (int64 i = 0; i < users.size(); ++i) {
     HloInstruction* user = users[i];
     const HloInstruction* slice = user->operand(0);
     auto new_user = computation->AddInstruction(
@@ -215,29 +217,27 @@ void SliceDelaying::GenerateNewOp(const std::vector<HloInstruction*>& operands,
     to_remove_.insert(user);
   }
 
-  split_slices_.insert(
-      std::pair<const HloInstruction*, ConstInstructionVector>
-      (new_op, slices));
+  split_slices_.insert(std::make_pair(new_op, slices));
 }
 
-bool SliceDelaying::Merge(const HloInstruction* inst) {
+bool SliceDelayer::Merge(const HloInstruction* inst) {
   // check operands
   std::vector<HloInstruction*> operands;
   for (HloInstruction* slice : inst->operands()) {
-    if (!CheckSlice(slice))
+    if (!IsUnstridedSlice(slice))
       return false;
     HloInstruction* operand = slice->mutable_operand(0);
     if (!IsSplitSlice(operand, slice))
       return false;
     operands.push_back(operand);
   }
-  for (int i = 0; i < operands.size(); ++i) {
+  for (int64 i = 0; i < operands.size(); ++i) {
     VLOG(1) << "CheckOperand: ops[" << i << "]: " << operands[i]->ToString();
   }
 
   // check users
   std::vector<HloInstruction*> users;
-  for (int i = 0; i < split_slices_.find(operands[0])->second.size(); ++i) {
+  for (int64 i = 0; i < split_slices_.find(operands[0])->second.size(); ++i) {
     const HloInstruction* slice = GetSlice(operands[0], i);
     VLOG(1) << "CheckUser: slice[" << i << "]: " << slice->ToString();
     // TODO(xinan): support multi users
@@ -251,7 +251,7 @@ bool SliceDelaying::Merge(const HloInstruction* inst) {
       return false;
     users.push_back(user);
   }
-  for (int i = 0; i < users.size(); ++i) {
+  for (int64 i = 0; i < users.size(); ++i) {
     VLOG(1) << "CheckUser: users[" << i << "]: " << users[i]->ToString();
   }
 
@@ -262,16 +262,12 @@ bool SliceDelaying::Merge(const HloInstruction* inst) {
   return true;
 }
 
-StatusOr<bool> SliceDelaying::Run(HloModule* module) {
-  VLOG(0) << "Run Pass: " << name();
-  VLOG(1) << "before: " << name() << "\n" << module->ToString();
-
+bool SliceDelayer::Run(HloComputation* computation) {
   to_remove_.clear();
   split_slices_.clear();
   bool changed = false;
 
-  for (HloInstruction* instruction :
-       module->entry_computation()->MakeInstructionPostOrder()) {
+  for (HloInstruction* instruction : computation->MakeInstructionPostOrder()) {
     if (std::find(to_remove_.begin(), to_remove_.end(), instruction)
         != to_remove_.end()) {
       VLOG(1) << "The instruction has been removed" << instruction->ToString();
@@ -292,14 +288,24 @@ StatusOr<bool> SliceDelaying::Run(HloModule* module) {
     VLOG(1) << "Delete: " << inst->ToString();
     inst->parent()->RemoveInstruction(inst);
   }
+
   to_remove_.clear();
-  for (auto pair : split_slices_) {
-    pair.second.clear();
-  }
   split_slices_.clear();
 
-  VLOG(1) << "after: " << name() << "\n" <<  module->ToString();
+  return changed;
+}
 
+StatusOr<bool> SliceDelaying::Run(HloModule* module) {
+  VLOG(0) << "Run Pass: " << name();
+  VLOG(1) << "before: " << name() << "\n" << module->ToString();
+  SliceDelayer slice_delayer;
+  bool changed = false;
+
+  for (HloComputation* computation : module->computations()) {
+    changed |= slice_delayer.Run(computation);
+  }
+
+  VLOG(1) << "after: " << name() << "\n" <<  module->ToString();
   return changed;
 }
 
