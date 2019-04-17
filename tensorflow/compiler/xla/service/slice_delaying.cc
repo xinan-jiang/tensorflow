@@ -16,6 +16,9 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/slice_delaying.h"
 #include <algorithm>
 #include <utility>
+#include <map>
+#include <set>
+#include <vector>
 
 namespace xla {
 
@@ -31,7 +34,7 @@ class SliceDelayer {
   bool BundleSlices(const HloInstruction* inst);
 
   // Returns whether the slices are delayed successfully.
-  bool MergeWithPeers(const HloInstruction* inst);
+  Status MergeWithPeers(const HloInstruction* inst);
 
   // Elimenate dead instructions.
   void EliminateDeadInstructions();
@@ -46,9 +49,15 @@ class SliceDelayer {
   // Returns i-th slice of operand
   const HloInstruction* GetSlice(const HloInstruction* operand, int64 i);
 
-  // Returns whethe the operands are the users' operands in the same order.
-  bool MayDelaySlicing(const std::vector< HloInstruction*>& operands,
-      const std::vector<HloInstruction*>& users);
+  // Collects true operands of inst, Returns whether the collection succeed.
+  StatusOr<std::vector<HloInstruction*>> GetTrueOperands(
+      const HloInstruction* inst);
+
+  // Collects true users of operands with the same opcode of inst.
+  // Returns whether the collection succeed.
+  StatusOr<std::vector<HloInstruction*>> GetSlicingUsers(
+      const HloInstruction* inst,
+      const std::vector< HloInstruction*>& operands);
 
   // Generate new operation instead of sliced operations, then slice the result.
   // Record the split-slices in split_slices_.
@@ -179,67 +188,38 @@ bool SliceDelayer::BundleSlices(const HloInstruction* inst) {
 //      v               v
 // split-slice     split-slice   <split-slices>
 //
-bool SliceDelayer::MergeWithPeers(const HloInstruction* inst) {
-  // Check operand:
-  // the inst's operand is a split-slice of the true operand.
-  // the operands-vector keeps the true-operands.
-  std::vector<HloInstruction*> operands;
-  for (HloInstruction* slice : inst->operands()) {
-    if (!IsUnstridedSlice(slice))
-      return false;
-    HloInstruction* operand = slice->mutable_operand(0);
-    if (!IsSplitSlice(operand, slice))
-      return false;
-    operands.push_back(operand);
-  }
+Status SliceDelayer::MergeWithPeers(const HloInstruction* inst) {
+  TF_ASSIGN_OR_RETURN(std::vector<HloInstruction*> operands,
+                      GetTrueOperands(inst));
   for (int64 i = 0; i < operands.size(); ++i) {
-    VLOG(1) << "CheckOperand: ops[" << i << "]: " << operands[i]->ToString();
+    VLOG(0) << "CheckOperand: ops[" << i << "]: " << operands[i]->ToString();
   }
-
-  // Check user:
-  // The users are which have the same operation and the same true operands of
-  // the inst. the inst is one of users.
-  // The users vector keeps the users of all split-slices of true-operand.
-  // Just keep the first true-operand's users in users-vector, because every
-  // true-operand should have the same users. Other true-operands will be check
-  // later.
-  std::vector<HloInstruction*> users;
-  for (int64 i = 0; i < split_slices_.find(operands[0])->second.size(); ++i) {
-    const HloInstruction* slice = GetSlice(operands[0], i);
-    VLOG(1) << "CheckUser: slice[" << i << "]: " << slice->ToString();
-    // TODO(xinan): support multi users
-    if (slice->user_count() > 1)
-      return false;
-    HloInstruction* user = slice->users()[0];
-    VLOG(1) << "CheckUser: user[" << i << "]: " << user->ToString();
-
-    // user should be the same operation as inst
-    if (user->opcode() != inst->opcode())
-      return false;
-    // user's operand order should be the same as inst
-    if (user->operand(0) != slice)
-      return false;
-    users.push_back(user);
-  }
+  TF_ASSIGN_OR_RETURN(std::vector<HloInstruction*> users,
+                      GetSlicingUsers(inst, operands));
   for (int64 i = 0; i < users.size(); ++i) {
-    VLOG(1) << "CheckUser: users[" << i << "]: " << users[i]->ToString();
+    VLOG(0) << "CheckOperand: users[" << i << "]: " << users[i]->ToString();
   }
-
-  // Check the true-operands have the same users and the users have the same
-  // operand order.
-  if (!MayDelaySlicing(operands, users))
-    return false;
 
   // Change HLO graph
   GenerateNewOp(operands, users);
-  return true;
+  return Status::OK();
 }
 
 void SliceDelayer::EliminateDeadInstructions() {
+  // Remove dead users
   for (auto inst : to_remove_) {
-    VLOG(1) << "Delete: " << inst->ToString();
+    VLOG(0) << "Delete: " << inst->ToString();
     inst->parent()->RemoveInstruction(inst);
   }
+  // Remove dead slice
+  for (auto pair : split_slices_) {
+    for (const HloInstruction* inst : pair.second) {
+      if (inst->user_count() == 0) {
+       HloInstruction* replica = const_cast<HloInstruction*>(inst);
+       replica->parent()->RemoveInstruction(replica);
+      }
+    }  // end for slices
+  }  // end for split_slices
 }
 
 void SliceDelayer::Clear() {
@@ -255,7 +235,7 @@ bool SliceDelayer::IsSplitSlice(
   auto iter_s = std::find(iter_m->second.begin(), iter_m->second.end(), slice);
   if (iter_m->second.end() == iter_s)
     return false;
-  VLOG(1) << "Split: " << operand->ToString() << "\nSlice: "
+  VLOG(0) << "Split: " << operand->ToString() << "\nSlice: "
           << slice->ToString();
   return true;
 }
@@ -265,58 +245,116 @@ const HloInstruction* SliceDelayer::GetSlice(
   return split_slices_.find(operand)->second[i];
 }
 
-bool SliceDelayer::MayDelaySlicing(
-    const std::vector< HloInstruction*>& operands,
-    const std::vector<HloInstruction*>& users) {
-  for (int64 i = 0; i < operands.size(); ++i) {
-    VLOG(1) << "MayDelaySlicing: ops[" << i << "]: " << operands[i]->ToString();
+StatusOr<std::vector<HloInstruction*>> SliceDelayer::GetTrueOperands(
+    const HloInstruction* inst) {
+  std::vector<HloInstruction*> operands;
+  // Check operand:
+  // the inst's operand is a split-slice of the true operand.
+  // the operands-vector keeps the true-operands.
+  for (HloInstruction* slice : inst->operands()) {
+    if (!IsUnstridedSlice(slice)) {
+      return tensorflow::errors::FailedPrecondition(
+          "Operation's operand should be unstride slice");
+    }
+    HloInstruction* operand = slice->mutable_operand(0);
+    if (!IsSplitSlice(operand, slice)) {
+      return tensorflow::errors::FailedPrecondition(
+          "Operation's operand should be split slice");
+    }
+    operands.push_back(operand);
   }
-  for (int64 i = 0; i < users.size(); ++i) {
-    VLOG(1) << "MayDelaySlicing: users[" << i << "]: " << users[i]->ToString();
+
+  for (int64 i = 0; i < operands.size(); ++i) {
+    VLOG(0) << "CheckOperand: ops[" << i << "]: " << operands[i]->ToString();
   }
 
   // Check operands:
-  // Every operand should have the same shape and the same num_split,
+  // operands should have the same shape and the same num_split,
   // Additionally num_split should be the same as user-count.
   const Shape shape = operands[0]->shape();
-  int64 split_size = users.size();
+  int64 split_size = split_slices_.find(operands[0])->second.size();
   for (const HloInstruction* operand : operands) {
     // Only support element-wise now
-    if (!ShapeUtil::Equal(operand->shape(), shape))
-      return false;
-    if (split_slices_.find(operand)->second.size() != split_size)
-      return false;
-  }
-
-  // Check users:
-  // users is the same operation and have the same count of operands.
-  const HloInstruction* split_op = nullptr;
-  HloOpcode op = users[0]->opcode();
-  int64 operand_num = operands.size();
-  for (int64 i = 0; i < split_size; ++i) {
-    if (users[i]->opcode() != op)
-      return false;
-    if (users[i]->operand_count() != operand_num)
-      return false;
-    const Shape split_shape = users[i]->shape();
-    // Check split-slices:
-    // operands are in the same operand order of users
-    for (int64 j = 0; j < operands.size(); ++j) {
-      const HloInstruction* operand = operands[j];
-      split_op = GetSlice(operand, i);
-      // Only support element-wise now
-      if (!ShapeUtil::Equal(split_op->shape(), split_shape))
-        return false;
-      // TODO(xinan): support more users
-      if (split_op->user_count() > 1)
-        return false;
-      // Match user i operand j
-      if (users[i]->operand(j) != split_op)
-        return false;
+    if (!ShapeUtil::Equal(operand->shape(), shape)) {
+      return tensorflow::errors::FailedPrecondition(
+          "Operation's true operand should be the same shape");
+    }
+    if (split_slices_.find(operand)->second.size() != split_size) {
+      return tensorflow::errors::FailedPrecondition(
+          "Operation's true operand should split to the same number of shards");
     }
   }
-  VLOG(1) << "MayDelaySlicing: succeed";
-  return true;
+  // Check split-slices:
+  // operands' split-slices should be in the same location adn same shape.
+  for (int64 i = 0; i < split_size; ++i) {
+    const HloInstruction *slice_0 = GetSlice(operands[0], i);
+    for (int64 j = 1; j < operands.size(); ++j) {
+      const HloInstruction *slice_j = GetSlice(operands[j], i);
+      if (!ShapeUtil::Equal(slice_0->shape(), slice_j->shape())) {
+        return tensorflow::errors::FailedPrecondition(
+            "Operation's operand should be the same shape");
+      }
+      if (slice_0->slice_starts() != slice_0->slice_starts()) {
+        return tensorflow::errors::FailedPrecondition(
+            "Operation's operand should be start from the same idx");
+      }
+      if (slice_0->slice_limits() != slice_0->slice_limits()) {
+        return tensorflow::errors::FailedPrecondition(
+            "Operation's operand should be end to the same idx");
+      }
+      // no match stride because the stride is always 1. we have checked.
+    }
+  }
+
+  return operands;
+}
+
+StatusOr<std::vector<HloInstruction*>> SliceDelayer::GetSlicingUsers(
+    const HloInstruction* inst, const std::vector<HloInstruction*>& operands) {
+  std::vector<HloInstruction*> users;
+  HloInstruction* operand0 = operands[0];
+  int64 split_size = split_slices_.find(operand0)->second.size();
+  for (int64 i = 0; i < split_size; ++i) {
+    const HloInstruction* slice_0 = GetSlice(operand0, i);
+    VLOG(0) << "GetUserSlice: " << slice_0->ToString();
+
+    HloInstruction* selected_user = nullptr;
+    for (HloInstruction* user : slice_0->users()) {
+      VLOG(0) << "TryGetUser: " << user->ToString();
+      // user should be the same operation and same operand count as inst
+      if (user->opcode() != inst->opcode() ||
+          user->operand_count() != inst->operand_count()) {
+        continue;
+      }
+
+      // user's operand should be a split-slice of the true operand in order
+      bool bContinue = false;
+      for (int64 j = 0; j < operands.size(); ++j) {
+        const HloInstruction* slice_j = GetSlice(operands[j], i);
+        if (user->operand(j) != slice_j) {
+          bContinue = true;
+          break;
+        }
+        // TODO(xinan): if overlapping is supported, it needs to check
+        // slice_start, slice_limit
+      }
+      if (bContinue) {
+        continue;
+      }
+
+      // found the user
+      selected_user = user;
+      break;
+    }
+
+    // if no such user found, return false
+    if (selected_user == nullptr) {
+      return tensorflow::errors::FailedPrecondition(
+          "Could not found valid user inorder ", i);
+    }
+    users.push_back(selected_user);
+  }
+  return users;
 }
 
 void SliceDelayer::GenerateNewOp(const std::vector<HloInstruction*>& operands,
@@ -326,28 +364,29 @@ void SliceDelayer::GenerateNewOp(const std::vector<HloInstruction*>& operands,
   HloComputation* computation = users[0]->parent();
   auto new_op = computation->AddInstruction(
       users[0]->CloneWithNewOperands(shape, operands));
-  VLOG(1) << "Add NewOp: " << new_op->ToString();
+  VLOG(0) << "Add NewOp: " << new_op->ToString();
 
   std::vector<const HloInstruction*> slices;
+  // replace the old users and their slice operands with new op and its slices,
+  // new users
   for (int64 i = 0; i < users.size(); ++i) {
     HloInstruction* user = users[i];
     const HloInstruction* slice = user->operand(0);
     auto new_user = computation->AddInstruction(
         slice->CloneWithNewOperands(user->shape(), {new_op}));
-    VLOG(1) << "Add NewSlice: " << new_user->ToString()
+    VLOG(0) << "Add NewSlice: " << new_user->ToString()
             << "\nReplace: " << user->ToString();
     user->ReplaceAllUsesWith(new_user);
     slices.push_back(new_user);
     to_remove_.insert(user);
-    // TODO(xinan): if user's operands has no other users, remove them too.
-  }
+  }  // end for users
 
   split_slices_.insert(std::make_pair(new_op, slices));
 }
 
 StatusOr<bool> SliceDelaying::Run(HloModule* module) {
   VLOG(0) << "Run Pass: " << name();
-  VLOG(1) << "before: " << name() << "\n" << module->ToString();
+  VLOG(0) << "before: " << name() << "\n" << module->ToString();
   SliceDelayer slice_delayer;
   bool changed = false;
 
@@ -356,7 +395,7 @@ StatusOr<bool> SliceDelaying::Run(HloModule* module) {
         computation->MakeInstructionPostOrder()) {
       // Skip the removed instruction
       if (slice_delayer.IsRemoved(instruction)) {
-        VLOG(1) << "The instruction has been removed"
+        VLOG(0) << "The instruction has been removed"
                 << instruction->ToString();
         continue;
       }
@@ -364,13 +403,13 @@ StatusOr<bool> SliceDelaying::Run(HloModule* module) {
       // Bundles split-slices and tries merge elementwise instruction with its
       // peers.
       if (instruction->opcode() == HloOpcode::kSlice) {
-        VLOG(1) << "Bundle slice: " << instruction->ToString();
+        VLOG(0) << "Bundle slice: " << instruction->ToString();
         slice_delayer.BundleSlices(instruction->mutable_operand(0));
       } else if (instruction->IsElementwise()
                  && instruction->operand_count() != 0) {
         // TODO(xinan): more other instructions
-        VLOG(1) << "Merge inst: " << instruction->ToString();
-        changed |= slice_delayer.MergeWithPeers(instruction);
+        VLOG(0) << "Merge inst: " << instruction->ToString();
+        changed |= slice_delayer.MergeWithPeers(instruction).ok();
       }
     }  // end for instructions in computation
   }  // end for computations in module
@@ -378,7 +417,7 @@ StatusOr<bool> SliceDelaying::Run(HloModule* module) {
   // Clears dead nodes
   slice_delayer.EliminateDeadInstructions();
   slice_delayer.Clear();
-  VLOG(1) << "after: " << name() << "\n" <<  module->ToString();
+  VLOG(0) << "after: " << name() << "\n" <<  module->ToString();
   return changed;
 }
 

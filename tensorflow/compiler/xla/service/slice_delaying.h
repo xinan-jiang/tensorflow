@@ -16,10 +16,6 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_XLA_SERVICE_SLICE_DELAYING_H_
 #define TENSORFLOW_COMPILER_XLA_SERVICE_SLICE_DELAYING_H_
 
-#include <map>
-#include <set>
-#include <vector>
-
 #include "tensorflow/compiler/xla/service/hlo_pass_interface.h"
 #include "absl/container/flat_hash_map.h"
 
