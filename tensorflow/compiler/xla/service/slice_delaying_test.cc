@@ -131,12 +131,6 @@ TEST_F(SliceDelayingTest, SplitDualDimension) {
                           RunHloPass(&slice_delaying, module.get()));
   EXPECT_TRUE(result);
   EXPECT_EQ(12, module->entry_computation()->instruction_count());
-  EXPECT_THAT(module->entry_computation()->root_instruction(),
-      GmockMatch(m::Tuple(m::Slice(m::Add(m::Parameter(0), m::Parameter(1))),
-          m::Slice(m::Add(m::Parameter(0), m::Parameter(1))),
-          m::Multiply(m::Slice(m::Parameter(0)), m::Slice(m::Parameter(1))),
-          m::Multiply(m::Slice(m::Parameter(0)), m::Slice(m::Parameter(1))))));
-
   TF_ASSERT_OK_AND_ASSIGN(result,
                           RunHloPass(&slice_delaying, module.get()));
   EXPECT_TRUE(result);
