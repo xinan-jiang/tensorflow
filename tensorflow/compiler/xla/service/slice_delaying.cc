@@ -16,9 +16,9 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/slice_delaying.h"
 #include <algorithm>
 #include <utility>
-#include <map>
 #include <set>
 #include <vector>
+#include "absl/container/flat_hash_map.h"
 
 namespace xla {
 
@@ -81,16 +81,19 @@ bool IsUnstridedSlice(const HloInstruction* inst) {
 int64 GetSplitedDim(const HloInstruction* inst, const HloInstruction* slice) {
   const Shape shape = inst->shape();
   const Shape slice_shape = slice->shape();
-  if (ShapeUtil::TrueRank(shape) != ShapeUtil::TrueRank(slice_shape))
+  if (ShapeUtil::TrueRank(shape) != ShapeUtil::TrueRank(slice_shape)) {
     return -1;
+  }
 
   int64 slice_dimension = -1;
   for (int64 i = 0; i < ShapeUtil::TrueRank(shape); ++i) {
-    if (shape.dimensions(i) == slice_shape.dimensions(i))
+    if (shape.dimensions(i) == slice_shape.dimensions(i)) {
       continue;
+    }
     // more then one dimension
-    if (slice_dimension != -1)
+    if (slice_dimension != -1) {
       return -1;
+    }
     slice_dimension = i;
   }
   return slice_dimension;
@@ -112,8 +115,9 @@ bool IsSlicesContinuous(
 // Returns whether the slices are equivalent to a split operation
 bool IsSplitSlices(const HloInstruction* inst, int64 dim,
     const std::vector<const HloInstruction*>& slices) {
-  if (!IsSlicesContinuous(slices, dim))
+  if (!IsSlicesContinuous(slices, dim)) {
     return false;
+  }
   const HloInstruction* first = slices.front();
   const HloInstruction* last = slices.back();
   if (last->slice_limits(dim) != inst->shape().dimensions(dim)
@@ -134,18 +138,21 @@ bool SliceDelayer::IsRemoved(const HloInstruction* instruction) {
 bool SliceDelayer::BundleSlices(const HloInstruction* inst) {
   auto iter = split_slices_.find(inst);
   // slice has been collected into split_slices_
-  if (iter != split_slices_.end())
+  if (iter != split_slices_.end()) {
     return false;
+  }
 
   // Check whether slice is a candidate of split-slices.
   // First just check slice self-attribute.
-  std::map<int64, std::vector<const HloInstruction*>> dim_slices;
+  absl::flat_hash_map<int64, std::vector<const HloInstruction*>> dim_slices;
   for (auto user : inst->users()) {
-    if (!IsUnstridedSlice(user))
+    if (!IsUnstridedSlice(user)) {
       continue;
+    }
     int64 dim = GetSplitedDim(inst, user);
-    if (dim == -1)
+    if (dim == -1) {
       continue;
+    }
     dim_slices[dim].push_back(user);
   }
 
@@ -153,8 +160,9 @@ bool SliceDelayer::BundleSlices(const HloInstruction* inst) {
   for (auto pair : dim_slices) {
     int64 dim = pair.first;
     std::vector<const HloInstruction*>& vec = pair.second;
-    if (vec.size() < 2)
+    if (vec.size() < 2) {
       continue;
+    }
     std::sort(vec.begin(), vec.end(),
               [](const HloInstruction* lhs, const HloInstruction* rhs) {
                 return lhs->slice_starts() < rhs->slice_starts();
@@ -230,11 +238,13 @@ void SliceDelayer::Clear() {
 bool SliceDelayer::IsSplitSlice(
     const HloInstruction* operand, const HloInstruction* slice) {
   auto iter_m = split_slices_.find(operand);
-  if (split_slices_.end() == iter_m)
+  if (split_slices_.end() == iter_m) {
     return false;
+  }
   auto iter_s = std::find(iter_m->second.begin(), iter_m->second.end(), slice);
-  if (iter_m->second.end() == iter_s)
+  if (iter_m->second.end() == iter_s) {
     return false;
+  }
   VLOG(0) << "Split: " << operand->ToString() << "\nSlice: "
           << slice->ToString();
   return true;
