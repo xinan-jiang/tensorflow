@@ -399,5 +399,72 @@ TEST_F(SliceDelayingTest, Stride) {
           m::Slice(m::Add(m::Parameter(0), m::Parameter(1))))));
 }
 
+TEST_F(SliceDelayingTest, NotAllSliceOperand) {
+  const char* kModuleStr = R"(
+    HloModule m
+    test {
+      p0 = f32[8,8] parameter(0)
+      p1 = f32[2,8] parameter(1)
+      p2 = f32[6,8] parameter(2)
+      s00 = f32[2,8] slice(f32[8,8] p0), slice={[0:2], [0:8]}
+      s01 = f32[6,8] slice(f32[8,8] p0), slice={[2:8], [0:8]}
+      abs0 = f32[2,8] abs(f32[2,8] p1)
+      abs1 = f32[6,8] abs(f32[6,8] p2)
+      add0 = f32[2,8] add(f32[2,8] s00, f32[2,8] abs0)
+      add1 = f32[6,8] add(f32[6,8] s01, f32[6,8] abs1)
+      ROOT tuple = (f32[2,8], f32[6,8]) tuple(add0, add1)
+    }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(kModuleStr));
+  EXPECT_EQ(10, module->entry_computation()->instruction_count());
+  SliceDelaying slice_delaying;
+  TF_ASSERT_OK_AND_ASSIGN(bool result,
+                          RunHloPass(&slice_delaying, module.get()));
+  EXPECT_FALSE(result);
+  EXPECT_EQ(10, module->entry_computation()->instruction_count());
+  EXPECT_THAT(module->entry_computation()->root_instruction(),
+      GmockMatch(m::Tuple(
+          m::Add(m::Slice(m::Parameter(0)), m::Abs(m::Parameter(1))),
+          m::Add(m::Slice(m::Parameter(0)), m::Abs(m::Parameter(2))))));
+}
+
+TEST_F(SliceDelayingTest, Cascade) {
+  const char* kModuleStr = R"(
+    HloModule m
+    test {
+      p0 = f32[8,8] parameter(0)
+      p1 = f32[8,8] parameter(1)
+      p2 = f32[8,8] parameter(2)
+      s00 = f32[2,8] slice(f32[8,8] p0), slice={[0:2], [0:8]}
+      s01 = f32[6,8] slice(f32[8,8] p0), slice={[2:8], [0:8]}
+      s10 = f32[2,8] slice(f32[8,8] p1), slice={[0:2], [0:8]}
+      s11 = f32[6,8] slice(f32[8,8] p1), slice={[2:8], [0:8]}
+      add0 = f32[2,8] add(f32[2,8] s00, f32[2,8] s10)
+      s21 = f32[6,8] slice(f32[8,8] p2), slice={[2:8], [0:8]}
+      abs1 = f32[6,8] abs(f32[6,8] s21)
+      add3 = f32[6,8] add(f32[6,8] s01, f32[6,8] abs1)
+      add1 = f32[6,8] add(f32[6,8] s01, f32[6,8] s11)
+      s20 = f32[2,8] slice(f32[8,8] p2), slice={[0:2], [0:8]}
+      abs0 = f32[2,8] abs(f32[2,8] s20)
+      add2 = f32[2,8] add(f32[2,8] s00, f32[2,8] abs0)
+      ROOT tuple = (f32[2,8], f32[6,8]) tuple(add0, add1, add2, add3)
+    }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(kModuleStr));
+  EXPECT_EQ(16, module->entry_computation()->instruction_count());
+  SliceDelaying slice_delaying;
+  TF_ASSERT_OK_AND_ASSIGN(bool result,
+                          RunHloPass(&slice_delaying, module.get()));
+  EXPECT_TRUE(result);
+  EXPECT_EQ(11, module->entry_computation()->instruction_count());
+  EXPECT_THAT(module->entry_computation()->root_instruction(),
+      GmockMatch(m::Tuple(m::Slice(m::Add(m::Parameter(0), m::Parameter(1))),
+          m::Slice(m::Add(m::Parameter(0), m::Parameter(1))),
+          m::Slice(m::Add(m::Parameter(0), m::Abs(m::Parameter(2)))),
+          m::Slice(m::Add(m::Parameter(0), m::Abs(m::Parameter(2)))))));
+}
+
 }  // namespace
 }  // namespace xla

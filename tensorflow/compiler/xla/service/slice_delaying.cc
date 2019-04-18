@@ -30,10 +30,6 @@ class SliceDelayer {
   // Returns whether the instruction has been visited and computed change cost
   bool IsVisited(const HloInstruction* instruction) const;
 
-  // Bundles all the slices from the same operand.
-  // Returns whether bundle new slices.
-  bool BundleSlices(const HloInstruction* inst);
-
   // Returns whether the slices are delayed successfully.
   Status MergeWithPeers(const HloInstruction* inst);
 
@@ -44,16 +40,12 @@ class SliceDelayer {
   void Clear();
 
  private:
-  // Returns whether slice is a bundled-slice of operand
-  bool IsBundledSlice(const HloInstruction* operand,
-                      const HloInstruction* slice) const;
-
   // Collects true operands of inst.
   StatusOr<std::vector<HloInstruction*>> GetTrueOperands(
-      const HloInstruction* inst) const;
+      const HloInstruction* inst);
 
   // Collects true users of operands with the same opcode of inst, and update
-  // visited_users_
+  // visited_
   StatusOr<std::vector<HloInstruction*>> GetTrueUsers(
       const HloInstruction* inst,
       const std::vector<HloInstruction*>& operands);
@@ -63,10 +55,9 @@ class SliceDelayer {
   void GenerateNewOp(const std::vector<HloInstruction*>& operands,
       const std::vector<HloInstruction*>& users);
 
-  absl::flat_hash_map<const HloInstruction*,
-                      std::set<const HloInstruction*>> bundled_slices_;
+  std::set<const HloInstruction*> visited_;
 
-  std::set<HloInstruction*> visited_users_;
+  std::set<HloInstruction*> slices_;
 
   std::set<HloInstruction*> removed_;
 };
@@ -86,35 +77,8 @@ bool ShouldReplace(const std::vector<HloInstruction*>& operands,
 }  // namespace
 
 bool SliceDelayer::IsVisited(const HloInstruction* instruction) const {
-  return std::find(visited_users_.begin(), visited_users_.end(), instruction)
-      != visited_users_.end();
-}
-
-bool SliceDelayer::BundleSlices(const HloInstruction* inst) {
-  auto iter = bundled_slices_.find(inst);
-  // slice has been collected into bundled_slices_
-  if (iter != bundled_slices_.end()) {
-    return false;
-  }
-
-  VLOG(0) << "CheckOperand: inst " << inst->ToString();
-  std::set<const HloInstruction*> slices;
-  bool collected = false;
-  for (auto user : inst->users()) {
-    if (user->opcode() == HloOpcode::kSlice) {
-  VLOG(0) << "CheckOperand: slice user " << user->ToString();
-      slices.insert(user);
-      collected = true;
-    }
-  }
-
-  for (auto slice : slices) {
-    VLOG(0) << "CheckOperand: " << slice->ToString();
-  }
-  if (!slices.empty()) {
-    bundled_slices_.insert(std::make_pair(inst, slices));
-  }
-  return collected;
+  return std::find(visited_.begin(), visited_.end(), instruction)
+      != visited_.end();
 }
 
 // =================================Before======================================
@@ -160,54 +124,34 @@ void SliceDelayer::EliminateDeadInstructions() {
     VLOG(0) << "Delete: " << inst->ToString();
     inst->parent()->RemoveInstruction(inst);
   }
-  // Remove dead slice
-  for (auto pair : bundled_slices_) {
-    for (const HloInstruction* inst : pair.second) {
-      if (inst->user_count() == 0) {
-       HloInstruction* replica = const_cast<HloInstruction*>(inst);
-       replica->parent()->RemoveInstruction(replica);
-      }
-    }  // end for slices
-  }  // end for bundled_slices
+  // Remove dead users
+  for (auto inst : slices_) {
+    if (inst->user_count() == 0) {
+      VLOG(0) << "Delete: " << inst->ToString();
+      inst->parent()->RemoveInstruction(inst);
+    }
+  }
 }
 
 void SliceDelayer::Clear() {
-  bundled_slices_.clear();
-  visited_users_.clear();
+  visited_.clear();
+  slices_.clear();
   removed_.clear();
 }
 
-bool SliceDelayer::IsBundledSlice(
-    const HloInstruction* operand, const HloInstruction* slice) const {
-  auto iter_m = bundled_slices_.find(operand);
-  if (bundled_slices_.end() == iter_m) {
-    return false;
-  }
-  auto iter_s = iter_m->second.find(slice);
-  if (iter_m->second.end() == iter_s) {
-    return false;
-  }
-  VLOG(0) << "Split: " << operand->ToString() << "\nSlice: "
-          << slice->ToString();
-  return true;
-}
-
 StatusOr<std::vector<HloInstruction*>> SliceDelayer::GetTrueOperands(
-    const HloInstruction* inst) const {
+    const HloInstruction* inst) {
   std::vector<HloInstruction*> operands;
   // Check operand:
   // the inst's operand is a bundled-slice of the true operand.
   // the operands-vector keeps the true-operands.
   for (HloInstruction* slice : inst->operands()) {
     if (slice->opcode() != HloOpcode::kSlice) {
+      visited_.insert(inst);
       return tensorflow::errors::FailedPrecondition(
           "Operation's operand should be bundled slice");
     }
     HloInstruction* operand = slice->mutable_operand(0);
-    if (!IsBundledSlice(operand, slice)) {
-      return tensorflow::errors::FailedPrecondition(
-          "Operation's operand should be bundled slice");
-    }
     operands.push_back(operand);
   }
   for (int64 i = 0; i < operands.size(); ++i) {
@@ -220,6 +164,7 @@ StatusOr<std::vector<HloInstruction*>> SliceDelayer::GetTrueOperands(
   for (const HloInstruction* operand : operands) {
     // Only support element-wise now
     if (!ShapeUtil::Equal(operand->shape(), shape)) {
+      visited_.insert(inst);
       return tensorflow::errors::FailedPrecondition(
           "Operation's true operand should be the same shape");
     }
@@ -236,7 +181,10 @@ StatusOr<std::vector<HloInstruction*>> SliceDelayer::GetTrueUsers(
   std::vector<HloInstruction*> users;
   HloInstruction* operand0 = operands[0];
 
-  for (const HloInstruction* slice_0 : bundled_slices_.find(operand0)->second) {
+  for (const HloInstruction* slice_0 : operand0->users()) {
+    if (slice_0->opcode() != HloOpcode::kSlice) {
+      continue;
+    }
     VLOG(0) << "GetUserSlice: " << slice_0->ToString();
 
     for (HloInstruction* user : slice_0->users()) {
@@ -248,14 +196,18 @@ StatusOr<std::vector<HloInstruction*>> SliceDelayer::GetTrueUsers(
         continue;
       }
 
-      // user's operand should be a bundled-slice of the true operand in order
+      // user's operand should be a slice of the true operand in order
       bool bContinue = false;
       for (int64 j = 0; j < operands.size(); ++j) {
         const HloInstruction* slice_j = user->operand(j);
-        if (!IsBundledSlice(operands[j], slice_j)
-            || slice_0->slice_starts() != slice_j->slice_starts()
-            || slice_0->slice_limits() != slice_j->slice_limits()
-            || slice_0->slice_strides() != slice_j->slice_strides()) {
+        // user's operand should be a slice of the true operand in order.
+        // the slice of operands should sliced from the same location (only for
+        // elementwise)
+        if (slice_j->opcode() != HloOpcode::kSlice ||
+            slice_j->operand(0) != operands[j] ||
+            slice_0->slice_starts() != slice_j->slice_starts() ||
+            slice_0->slice_limits() != slice_j->slice_limits() ||
+            slice_0->slice_strides() != slice_j->slice_strides()) {
           bContinue = true;
           break;
         }
@@ -267,14 +219,14 @@ StatusOr<std::vector<HloInstruction*>> SliceDelayer::GetTrueUsers(
       // found the user
       VLOG(0) << "GetUser: " << user->ToString();
       users.push_back(user);
-      visited_users_.insert(user);
-      break;
+      visited_.insert(user);
     }  // end for loop slice_0->users
-  }
+  }  // end for loop operand0's slice users
   for (int64 i = 0; i < users.size(); ++i) {
     VLOG(0) << "CheckOperand: users[" << i << "]: " << users[i]->ToString();
   }
 
+  // caculate the cost, return whethe should be changed.
   if (users.empty()) {
     return tensorflow::errors::FailedPrecondition(
         "No found valid users");
@@ -295,22 +247,21 @@ void SliceDelayer::GenerateNewOp(const std::vector<HloInstruction*>& operands,
       users[0]->CloneWithNewOperands(shape, operands));
   VLOG(0) << "Add NewOp: " << new_op->ToString();
 
-  std::set<const HloInstruction*> slices;
   // replace the old user and its slice operands with new operation and its
   // slice user.
-  for (int64 i = 0; i < users.size(); ++i) {
-    HloInstruction* user = users[i];
+  for (HloInstruction* user : users) {
     const HloInstruction* slice = user->operand(0);
     auto new_user = computation->AddInstruction(
         slice->CloneWithNewOperands(user->shape(), {new_op}));
     VLOG(0) << "Add NewSlice: " << new_user->ToString()
             << "\nReplace: " << user->ToString();
     user->ReplaceAllUsesWith(new_user);
-    slices.insert(new_user);
+
+    for (HloInstruction* slice_operand : user->operands()) {
+      slices_.insert(slice_operand);
+    }
     removed_.insert(user);
   }  // end for users
-
-  bundled_slices_.insert(std::make_pair(new_op, slices));
 }
 
 StatusOr<bool> SliceDelaying::Run(HloModule* module) {
@@ -331,11 +282,7 @@ StatusOr<bool> SliceDelaying::Run(HloModule* module) {
 
       // Bundles bundled-slices and tries merge elementwise instruction with its
       // peers.
-      if (instruction->opcode() == HloOpcode::kSlice) {
-        VLOG(0) << "Bundle slice: " << instruction->ToString();
-        slice_delayer.BundleSlices(instruction->mutable_operand(0));
-      } else if (instruction->IsElementwise()
-                 && instruction->operand_count() != 0) {
+      if (instruction->IsElementwise() && instruction->operand_count() != 0) {
         // TODO(xinan): more other instructions
         VLOG(0) << "Merge inst: " << instruction->ToString();
         changed |= slice_delayer.MergeWithPeers(instruction).ok();
