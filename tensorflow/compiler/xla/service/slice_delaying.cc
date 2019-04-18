@@ -51,7 +51,7 @@ class SliceDelayer {
       const std::vector<HloInstruction*>& operands);
 
   // Generate new operation instead of sliced operations, then slice the result.
-  // Record the bundled-slices in bundled_slices_.
+  // Record the stale users and slices for prepare removing
   void GenerateNewOp(const std::vector<HloInstruction*>& operands,
       const std::vector<HloInstruction*>& users);
 
@@ -124,7 +124,8 @@ void SliceDelayer::EliminateDeadInstructions() {
     VLOG(0) << "Delete: " << inst->ToString();
     inst->parent()->RemoveInstruction(inst);
   }
-  // Remove dead users
+
+  // Remove dead slices
   for (auto inst : slices_) {
     if (inst->user_count() == 0) {
       VLOG(0) << "Delete: " << inst->ToString();
@@ -143,19 +144,25 @@ StatusOr<std::vector<HloInstruction*>> SliceDelayer::GetTrueOperands(
     const HloInstruction* inst) {
   std::vector<HloInstruction*> operands;
   // Check operand:
-  // the inst's operand is a bundled-slice of the true operand.
+  // the inst's operand should be a slice of the true operand.
   // the operands-vector keeps the true-operands.
   for (HloInstruction* slice : inst->operands()) {
     if (slice->opcode() != HloOpcode::kSlice) {
       visited_.insert(inst);
       return tensorflow::errors::FailedPrecondition(
-          "Operation's operand should be bundled slice");
+          "Operation's operand should be slice");
     }
     HloInstruction* operand = slice->mutable_operand(0);
     operands.push_back(operand);
   }
   for (int64 i = 0; i < operands.size(); ++i) {
     VLOG(0) << "CheckOperand: ops[" << i << "]: " << operands[i]->ToString();
+  }
+
+  // No operands, skip this instruction
+  if (operands.empty()) {
+    return tensorflow::errors::FailedPrecondition(
+        "Operation has no true operands");
   }
 
   // Check operands:
@@ -182,6 +189,7 @@ StatusOr<std::vector<HloInstruction*>> SliceDelayer::GetTrueUsers(
   HloInstruction* operand0 = operands[0];
 
   for (const HloInstruction* slice_0 : operand0->users()) {
+    // skip non-slice user
     if (slice_0->opcode() != HloOpcode::kSlice) {
       continue;
     }
@@ -196,11 +204,10 @@ StatusOr<std::vector<HloInstruction*>> SliceDelayer::GetTrueUsers(
         continue;
       }
 
-      // user's operand should be a slice of the true operand in order
-      bool bContinue = false;
+      // user's every operand should be a slice of the true operand in order
+      bool isValidUser = true;
       for (int64 j = 0; j < operands.size(); ++j) {
         const HloInstruction* slice_j = user->operand(j);
-        // user's operand should be a slice of the true operand in order.
         // the slice of operands should sliced from the same location (only for
         // elementwise)
         if (slice_j->opcode() != HloOpcode::kSlice ||
@@ -208,11 +215,11 @@ StatusOr<std::vector<HloInstruction*>> SliceDelayer::GetTrueUsers(
             slice_0->slice_starts() != slice_j->slice_starts() ||
             slice_0->slice_limits() != slice_j->slice_limits() ||
             slice_0->slice_strides() != slice_j->slice_strides()) {
-          bContinue = true;
+          isValidUser = false;
           break;
         }
       }
-      if (bContinue) {
+      if (!isValidUser) {
         continue;
       }
 
@@ -226,7 +233,8 @@ StatusOr<std::vector<HloInstruction*>> SliceDelayer::GetTrueUsers(
     VLOG(0) << "CheckOperand: users[" << i << "]: " << users[i]->ToString();
   }
 
-  // caculate the cost, return whethe should be changed.
+  // calculate the cost. If the no user found or only few small users, skip this
+  // instruction.
   if (users.empty()) {
     return tensorflow::errors::FailedPrecondition(
         "No found valid users");
@@ -273,16 +281,10 @@ StatusOr<bool> SliceDelaying::Run(HloModule* module) {
   for (HloComputation* computation : module->computations()) {
     for (HloInstruction* instruction :
         computation->MakeInstructionPostOrder()) {
-      // Skip the removed instruction
-      if (slice_delayer.IsVisited(instruction)) {
-        VLOG(0) << "The instruction has been removed"
-                << instruction->ToString();
-        continue;
-      }
-
-      // Bundles bundled-slices and tries merge elementwise instruction with its
-      // peers.
-      if (instruction->IsElementwise() && instruction->operand_count() != 0) {
+      // Skip the visited instruction tries merge elementwise instruction with
+      // its peers.
+      if (!slice_delayer.IsVisited(instruction) &&
+          instruction->IsElementwise() && instruction->operand_count() != 0) {
         // TODO(xinan): more other instructions
         VLOG(0) << "Merge inst: " << instruction->ToString();
         changed |= slice_delayer.MergeWithPeers(instruction).ok();
