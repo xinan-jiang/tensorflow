@@ -166,11 +166,22 @@ StatusOr<std::vector<HloInstruction*>> SliceDelayer::GetTrueOperands(
   }
 
   // Check operands:
-  // operands should have the same shape.
+  // true operands should have the same shape.(because of elementwise)
   const Shape shape = operands[0]->shape();
   for (const HloInstruction* operand : operands) {
     // Only support element-wise now
     if (!ShapeUtil::Equal(operand->shape(), shape)) {
+      visited_.insert(inst);
+      return tensorflow::errors::FailedPrecondition(
+          "Operation's true operand should be the same shape");
+    }
+  }
+  // operands should slice from the same location of true operands
+  const HloInstruction* operand0 = inst->operand(0);
+  for (const HloInstruction* operand : inst->operands()) {
+    if (operand0->slice_starts() != operand->slice_starts() ||
+        operand0->slice_limits() != operand->slice_limits() ||
+        operand0->slice_strides() != operand->slice_strides()) {
       visited_.insert(inst);
       return tensorflow::errors::FailedPrecondition(
           "Operation's true operand should be the same shape");
