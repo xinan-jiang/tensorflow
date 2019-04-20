@@ -18,7 +18,6 @@ limitations under the License.
 #include <utility>
 #include <set>
 #include <vector>
-#include "absl/container/flat_hash_map.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 
 namespace xla {
