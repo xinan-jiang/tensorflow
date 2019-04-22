@@ -16,8 +16,8 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/slice_delaying.h"
 #include <algorithm>
 #include <utility>
-#include <set>
 #include <vector>
+#include "absl/container/flat_hash_set.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 
 namespace xla {
@@ -35,9 +35,6 @@ class SliceDelayer {
   // Elimenate dead instructions.
   void EliminateDeadInstructions();
 
-  // Clear containers.
-  void Clear();
-
  private:
   // Collects true operands of inst.
   StatusOr<std::vector<HloInstruction*>> GetTrueOperands(
@@ -54,11 +51,11 @@ class SliceDelayer {
   void GenerateNewOp(const std::vector<HloInstruction*>& operands,
       const std::vector<HloInstruction*>& users);
 
-  std::set<const HloInstruction*> visited_;
+  absl::flat_hash_set<const HloInstruction*> visited_;
 
-  std::set<HloInstruction*> slices_;
+  absl::flat_hash_set<HloInstruction*> slices_;
 
-  std::set<HloInstruction*> removed_;
+  absl::flat_hash_set<HloInstruction*> removed_;
 };
 
 // Computes the cost of implimentation of delaying slice, and returns whether
@@ -68,7 +65,7 @@ bool ShouldReplace(const std::vector<HloInstruction*>& operands,
   // operands and user have the same shape because of elementwise operation
   int64 sum = 0;
   for (HloInstruction* user : users) {
-    sum += xla::ShapeUtil::ElementsIn(user->shape());
+    sum += ShapeUtil::ElementsIn(user->shape());
   }
   return sum >= xla::ShapeUtil::ElementsIn(operands[0]->shape());
 }
@@ -76,8 +73,7 @@ bool ShouldReplace(const std::vector<HloInstruction*>& operands,
 }  // namespace
 
 bool SliceDelayer::IsVisited(const HloInstruction* instruction) const {
-  return std::find(visited_.begin(), visited_.end(), instruction)
-      != visited_.end();
+  return visited_.contains(instruction);
 }
 
 // =================================Before======================================
@@ -128,12 +124,6 @@ void SliceDelayer::EliminateDeadInstructions() {
   }
 }
 
-void SliceDelayer::Clear() {
-  visited_.clear();
-  slices_.clear();
-  removed_.clear();
-}
-
 StatusOr<std::vector<HloInstruction*>> SliceDelayer::GetTrueOperands(
     const HloInstruction* inst) {
   std::vector<HloInstruction*> operands;
@@ -161,7 +151,7 @@ StatusOr<std::vector<HloInstruction*>> SliceDelayer::GetTrueOperands(
   const Shape shape = operands[0]->shape();
   for (const HloInstruction* operand : operands) {
     // Only support element-wise now
-    if (!ShapeUtil::Equal(operand->shape(), shape)) {
+    if (!ShapeUtil::Compatible(operand->shape(), shape)) {
       visited_.insert(inst);
       return tensorflow::errors::FailedPrecondition(
           "Operation's true operand should be the same shape");
@@ -223,8 +213,8 @@ StatusOr<std::vector<HloInstruction*>> SliceDelayer::GetTrueUsers(
       // found the user
       users.push_back(user);
       visited_.insert(user);
-    }  // end for loop slice_0->users
-  }  // end for loop operand0's slice users
+    }
+  }
 
   // calculate the cost. If the no user found or only few small users, skip this
   // instruction.
@@ -255,14 +245,14 @@ void SliceDelayer::GenerateNewOp(const std::vector<HloInstruction*>& operands,
     auto new_user = computation->AddInstruction(
         slice->CloneWithNewOperands(user->shape(), {new_op}));
     VLOG(10) << "Add NewSlice: " << new_user->ToString()
-            << "\nReplace: " << user->ToString();
+             << " Replace: " << user->ToString();
     user->ReplaceAllUsesWith(new_user);
 
     for (HloInstruction* slice_operand : user->operands()) {
       slices_.insert(slice_operand);
     }
     removed_.insert(user);
-  }  // end for users
+  }
 }
 
 StatusOr<bool> SliceDelaying::Run(HloModule* module) {
@@ -282,12 +272,11 @@ StatusOr<bool> SliceDelaying::Run(HloModule* module) {
         VLOG(10) << "Merge inst: " << instruction->ToString();
         changed |= slice_delayer.MergeWithPeers(instruction).ok();
       }
-    }  // end for instructions in computation
-  }  // end for computations in module
+    }
+  }
 
   // Clears dead nodes
   slice_delayer.EliminateDeadInstructions();
-  slice_delayer.Clear();
   VLOG(10) << "after: " << name() << "\n" <<  module->ToString();
   return changed;
 }
