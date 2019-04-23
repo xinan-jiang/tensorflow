@@ -58,7 +58,6 @@ TEST_F(SliceDelayingTest, Basic) {
   )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnVerifiedModule(kModuleStr));
-  EXPECT_EQ(9, module->entry_computation()->instruction_count());
   SliceDelaying slice_delaying;
   TF_ASSERT_OK_AND_ASSIGN(bool result,
                           RunHloPass(&slice_delaying, module.get()));
@@ -89,7 +88,6 @@ TEST_F(SliceDelayingTest, SliceDualDimension) {
   )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnVerifiedModule(kModuleStr));
-  EXPECT_EQ(12, module->entry_computation()->instruction_count());
   SliceDelaying slice_delaying;
   TF_ASSERT_OK_AND_ASSIGN(bool result,
                           RunHloPass(&slice_delaying, module.get()));
@@ -124,7 +122,6 @@ TEST_F(SliceDelayingTest, SplitDualDimension) {
   )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnVerifiedModule(kModuleStr));
-  EXPECT_EQ(15, module->entry_computation()->instruction_count());
   SliceDelaying slice_delaying;
   TF_ASSERT_OK_AND_ASSIGN(bool result,
                           RunHloPass(&slice_delaying, module.get()));
@@ -157,7 +154,6 @@ TEST_F(SliceDelayingTest, OverlapSlice) {
   )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnVerifiedModule(kModuleStr));
-  EXPECT_EQ(12, module->entry_computation()->instruction_count());
   SliceDelaying slice_delaying;
   TF_ASSERT_OK_AND_ASSIGN(bool result,
                           RunHloPass(&slice_delaying, module.get()));
@@ -186,7 +182,6 @@ TEST_F(SliceDelayingTest, PartialSplit) {
   )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnVerifiedModule(kModuleStr));
-  EXPECT_EQ(9, module->entry_computation()->instruction_count());
   SliceDelaying slice_delaying;
   TF_ASSERT_OK_AND_ASSIGN(bool result,
                           RunHloPass(&slice_delaying, module.get()));
@@ -210,7 +205,6 @@ TEST_F(SliceDelayingTest, PartialSlice) {
   )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnVerifiedModule(kModuleStr));
-  EXPECT_EQ(9, module->entry_computation()->instruction_count());
   SliceDelaying slice_delaying;
   TF_ASSERT_OK_AND_ASSIGN(bool result,
                           RunHloPass(&slice_delaying, module.get()));
@@ -234,7 +228,6 @@ TEST_F(SliceDelayingTest, OperantDisorder) {
   )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnVerifiedModule(kModuleStr));
-  EXPECT_EQ(9, module->entry_computation()->instruction_count());
   SliceDelaying slice_delaying;
   TF_ASSERT_OK_AND_ASSIGN(bool result,
                           RunHloPass(&slice_delaying, module.get()));
@@ -258,7 +251,6 @@ TEST_F(SliceDelayingTest, SliceDisorder) {
   )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnVerifiedModule(kModuleStr));
-  EXPECT_EQ(9, module->entry_computation()->instruction_count());
   SliceDelaying slice_delaying;
   TF_ASSERT_OK_AND_ASSIGN(bool result,
                           RunHloPass(&slice_delaying, module.get()));
@@ -282,7 +274,6 @@ TEST_F(SliceDelayingTest, DifferentOperator) {
   )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnVerifiedModule(kModuleStr));
-  EXPECT_EQ(9, module->entry_computation()->instruction_count());
   SliceDelaying slice_delaying;
   TF_ASSERT_OK_AND_ASSIGN(bool result,
                           RunHloPass(&slice_delaying, module.get()));
@@ -308,7 +299,6 @@ TEST_F(SliceDelayingTest, MultiUsers) {
   )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnVerifiedModule(kModuleStr));
-  EXPECT_EQ(11, module->entry_computation()->instruction_count());
   SliceDelaying slice_delaying;
   TF_ASSERT_OK_AND_ASSIGN(bool result,
                           RunHloPass(&slice_delaying, module.get()));
@@ -335,7 +325,6 @@ TEST_F(SliceDelayingTest, NonElementWise) {
   )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnVerifiedModule(kModuleStr));
-  EXPECT_EQ(6, module->entry_computation()->instruction_count());
   SliceDelaying slice_delaying;
   TF_ASSERT_OK_AND_ASSIGN(bool result,
                           RunHloPass(&slice_delaying, module.get()));
@@ -359,7 +348,6 @@ TEST_F(SliceDelayingTest, Stride) {
   )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnVerifiedModule(kModuleStr));
-  EXPECT_EQ(9, module->entry_computation()->instruction_count());
   SliceDelaying slice_delaying;
   TF_ASSERT_OK_AND_ASSIGN(bool result,
                           RunHloPass(&slice_delaying, module.get()));
@@ -388,7 +376,6 @@ TEST_F(SliceDelayingTest, NotAllSliceOperand) {
   )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnVerifiedModule(kModuleStr));
-  EXPECT_EQ(10, module->entry_computation()->instruction_count());
   SliceDelaying slice_delaying;
   TF_ASSERT_OK_AND_ASSIGN(bool result,
                           RunHloPass(&slice_delaying, module.get()));
@@ -419,7 +406,6 @@ TEST_F(SliceDelayingTest, Cascade) {
   )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
                           ParseAndReturnVerifiedModule(kModuleStr));
-  EXPECT_EQ(16, module->entry_computation()->instruction_count());
   SliceDelaying slice_delaying;
   TF_ASSERT_OK_AND_ASSIGN(bool result,
                           RunHloPass(&slice_delaying, module.get()));
