@@ -53,12 +53,6 @@ class SliceSinkerImpl {
       const HloInstruction* inst,
       const std::vector<HloInstruction*>& operands);
 
-  // Generates the new user with the whole tensor and slices its output instead
-  // of the true users with sliced tensor.
-  // Records the stale true users and their operand-slices to prepare removing.
-  void SinkSlices(const std::vector<HloInstruction*>& operands,
-      const std::vector<HloInstruction*>& users) const;
-
  private:
   absl::flat_hash_set<const HloInstruction*> visited_;
 };
@@ -78,6 +72,34 @@ bool ShouldReplace(const std::vector<HloInstruction*>& operands,
   // Compares the total elements in all true users and the elements of the new
   // user with whole shape.
   return sum >= xla::ShapeUtil::ElementsIn(operands[0]->shape());
+}
+
+// Generates the new user with the whole tensor and slices its output instead
+// of the true users with sliced tensor.
+// Records the stale true users and their operand-slices to prepare removing.
+void SinkSlices(const std::vector<HloInstruction*>& operands,
+    const std::vector<HloInstruction*>& users) {
+  // Generates new user.
+  const Shape shape = operands[0]->shape();
+  PrimitiveType element_type = users[0]->shape().element_type();
+  Shape new_shape = ShapeUtil::ChangeElementType(shape, element_type);
+
+  HloComputation* computation = users[0]->parent();
+  auto new_user = computation->AddInstruction(
+      users[0]->CloneWithNewOperands(new_shape, operands));
+  VLOG(10) << "Add NewUser: " << new_user->ToString();
+
+  // Replaces the true users with new user and its user-slices.
+  for (HloInstruction* user : users) {
+    const HloInstruction* operand_slice = user->operand(0);
+    // Generates user slices of new user.
+    auto user_slice = computation->AddInstruction(
+        operand_slice->CloneWithNewOperands(user->shape(), {new_user}));
+    VLOG(10) << "Add NewSlice: " << user_slice->ToString()
+             << " Replace: " << user->ToString();
+    // Replaces true users with user slices.
+    user->ReplaceAllUsesWith(user_slice);
+  }
 }
 
 }  // namespace
@@ -193,31 +215,6 @@ SliceSinkerImpl::FindPeerElementwiseOperations(
   return users;
 }
 
-void SliceSinkerImpl::SinkSlices(const std::vector<HloInstruction*>& operands,
-    const std::vector<HloInstruction*>& users) const {
-  // Generates new user.
-  const Shape shape = operands[0]->shape();
-  PrimitiveType element_type = users[0]->shape().element_type();
-  Shape new_shape = ShapeUtil::ChangeElementType(shape, element_type);
-
-  HloComputation* computation = users[0]->parent();
-  auto new_user = computation->AddInstruction(
-      users[0]->CloneWithNewOperands(new_shape, operands));
-  VLOG(10) << "Add NewUser: " << new_user->ToString();
-
-  // Replaces the true users with new user and its user-slices.
-  for (HloInstruction* user : users) {
-    const HloInstruction* operand_slice = user->operand(0);
-    // Generates user slices of new user.
-    auto user_slice = computation->AddInstruction(
-        operand_slice->CloneWithNewOperands(user->shape(), {new_user}));
-    VLOG(10) << "Add NewSlice: " << user_slice->ToString()
-             << " Replace: " << user->ToString();
-    // Replaces true users with user slices.
-    user->ReplaceAllUsesWith(user_slice);
-  }
-}
-
 // =================================Before======================================
 //
 //       +--true-operand---+         <operands>
@@ -266,7 +263,7 @@ StatusOr<bool> SliceSinker::Run(HloModule* module) {
       if (!peer_elementwise_operations.has_value()) {
         continue;
       }
-      impl.SinkSlices(source_operands_of_slices.value(),
+      SinkSlices(source_operands_of_slices.value(),
                       peer_elementwise_operations.value());
       changed = true;
     }
