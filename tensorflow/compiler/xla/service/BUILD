@@ -4019,6 +4019,7 @@ cc_library(
         "//tensorflow/compiler/xla:types",
         "//tensorflow/core:lib",
         "@com_google_absl//absl/types:optional",
+        "@com_google_absl//absl/types:span",
         "@com_google_absl//absl/container:flat_hash_set",
     ],
 )
