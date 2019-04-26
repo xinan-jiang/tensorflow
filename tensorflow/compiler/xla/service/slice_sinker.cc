@@ -19,7 +19,6 @@ limitations under the License.
 #include <vector>
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
-#include "absl/container/flat_hash_set.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 
 namespace xla {
@@ -155,10 +154,8 @@ absl::optional<std::vector<HloInstruction*>> FindPeerElementwiseOperations(
       // The inst's peers should be the same operation and same operand count as
       // inst.
       if (user->opcode() != inst->opcode() ||
-          user->operand_count() != inst->operand_count()) {
-        continue;
-      }
-      if (!IsPeerInstruction(user, slice_sources)) {
+          user->operand_count() != inst->operand_count() ||
+          !IsPeerInstruction(user, slice_sources)) {
         continue;
       }
 
@@ -167,12 +164,9 @@ absl::optional<std::vector<HloInstruction*>> FindPeerElementwiseOperations(
     }
   }
 
-  // Calculates the costs. If cost is more than profit, returns empty vector.
-  if (!ShouldReplace(slice_sources, peer_operations)) {
-    return absl::nullopt;
-  }
-
-  return peer_operations;
+  // Calculates the costs. If cost is more than profit, returns nullopt.
+  return ShouldReplace(slice_sources, peer_operations) ?
+      absl::make_optional(peer_operations) : absl::nullopt;
 }
 
 // Generates a new elementwise operation using the slice_sources as operands,
@@ -205,6 +199,17 @@ void SinkSlices(const std::vector<HloInstruction*>& slice_sources,
 
 }  // namespace
 
+// The group of elementwise operations being transformed meet the following
+// requirements:
+// (condition-1) The operands of each operation are slices taken from the same
+// indices of bigger tensors with the same dimensions.
+// (condition-2) All operations have the same opcode.
+// (condition-3) The corresponding operands of all operations are slices taken
+// from the same bigger tensors.
+// (condition-4) The accumulated size of the group of operations is not less
+// than the size of such a bigger tensor. This is a heuristic to ensure that the
+// transformation never causes us to do more elementwise operations.
+//
 // TODO(xinan): Supports more non-elementwise instructions. Some non-elementwise
 // instruction's slice operand could also sink in some circumstances. e.g. dot,
 // broadcast, reduce.
@@ -219,11 +224,17 @@ StatusOr<bool> SliceSinker::Run(HloModule* module) {
         continue;
       }
       VLOG(10) << "Merge inst: " << instruction->ToString();
+      // If instruction is an elementwise operation on similar slices, return
+      // the source operands of the slices. This check condition-1 described
+      // above.
       absl::optional<std::vector<HloInstruction*>> source_operands_of_slices =
           FindSourceOperandsOfSlicesForElementwiseOperation(instruction);
       if (!source_operands_of_slices.has_value()) {
         continue;
       }
+      // If we can find a group of elementwise operations on similar slices that
+      // meet condition 2~4 and includes instruction, return such a group of
+      // instructions.
       absl::optional<std::vector<HloInstruction*>> peer_elementwise_operations =
           FindPeerElementwiseOperations(instruction,
                                         source_operands_of_slices.value());
@@ -231,7 +242,7 @@ StatusOr<bool> SliceSinker::Run(HloModule* module) {
         continue;
       }
       SinkSlices(source_operands_of_slices.value(),
-                      peer_elementwise_operations.value());
+                 peer_elementwise_operations.value());
       changed = true;
     }
   }

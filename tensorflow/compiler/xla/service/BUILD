@@ -4020,7 +4020,6 @@ cc_library(
         "//tensorflow/core:lib",
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
-        "@com_google_absl//absl/container:flat_hash_set",
     ],
 )
 
