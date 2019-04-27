@@ -496,20 +496,15 @@ TEST_F(SliceSinkerTest, Cascade) {
     test {
       p0 = f32[8,9] parameter(0)
       p1 = f32[8,9] parameter(1)
-      p2 = f32[8,9] parameter(2)
       s00 = f32[2,9] slice(f32[8,9] p0), slice={[0:2], [0:9]}
       s01 = f32[6,9] slice(f32[8,9] p0), slice={[2:8], [0:9]}
       s10 = f32[2,9] slice(f32[8,9] p1), slice={[0:2], [0:9]}
       s11 = f32[6,9] slice(f32[8,9] p1), slice={[2:8], [0:9]}
-      add0 = f32[2,9] add(f32[2,9] s00, f32[2,9] s10)
-      s21 = f32[6,9] slice(f32[8,9] p2), slice={[2:8], [0:9]}
-      abs1 = f32[6,9] abs(f32[6,9] s21)
-      add3 = f32[6,9] add(f32[6,9] s01, f32[6,9] abs1)
-      add1 = f32[6,9] add(f32[6,9] s01, f32[6,9] s11)
-      s20 = f32[2,9] slice(f32[8,9] p2), slice={[0:2], [0:9]}
-      abs0 = f32[2,9] abs(f32[2,9] s20)
-      add2 = f32[2,9] add(f32[2,9] s00, f32[2,9] abs0)
-      ROOT tuple = (f32[2,9], f32[6,9]) tuple(add0, add1, add2, add3)
+      abs0 = f32[2,9] abs(f32[2,9] s10)
+      abs1 = f32[6,9] abs(f32[6,9] s11)
+      add0 = f32[2,9] add(f32[2,9] s00, f32[2,9] abs0)
+      add1 = f32[6,9] add(f32[6,9] s01, f32[6,9] abs1)
+      ROOT tuple = (f32[2,9], f32[6,9]) tuple(add0, add1)
     }
   )";
   TF_ASSERT_OK_AND_ASSIGN(auto module,
@@ -522,13 +517,11 @@ TEST_F(SliceSinkerTest, Cascade) {
   TF_ASSERT_OK_AND_ASSIGN(result,
                           RunHloPass(&dce, module.get()));
   EXPECT_TRUE(result);
-  EXPECT_EQ(11, module->entry_computation()->instruction_count());
+  EXPECT_EQ(7, module->entry_computation()->instruction_count());
   HloInstruction* inst = module->entry_computation()->root_instruction();
-  EXPECT_THAT(inst,
-      GmockMatch(m::Tuple(m::Slice(m::Add(m::Parameter(0), m::Parameter(1))),
-          m::Slice(m::Add(m::Parameter(0), m::Parameter(1))),
-          m::Slice(m::Add(m::Parameter(0), m::Abs(m::Parameter(2)))),
-          m::Slice(m::Add(m::Parameter(0), m::Abs(m::Parameter(2)))))));
+  EXPECT_THAT(inst, GmockMatch(m::Tuple(
+      m::Slice(m::Add(m::Parameter(0), m::Abs(m::Parameter(1)))),
+      m::Slice(m::Add(m::Parameter(0), m::Abs(m::Parameter(1)))))));
   HloInstruction* slice0 = inst->mutable_operand(0);
   EXPECT_EQ(slice0->slice_starts(), std::vector<int64>({0, 0}));
   EXPECT_EQ(slice0->slice_limits(), std::vector<int64>({2, 9}));
@@ -537,14 +530,6 @@ TEST_F(SliceSinkerTest, Cascade) {
   EXPECT_EQ(slice1->slice_starts(), std::vector<int64>({2, 0}));
   EXPECT_EQ(slice1->slice_limits(), std::vector<int64>({8, 9}));
   EXPECT_EQ(slice1->slice_strides(), std::vector<int64>({1, 1}));
-  HloInstruction* slice2 = inst->mutable_operand(2);
-  EXPECT_EQ(slice2->slice_starts(), std::vector<int64>({0, 0}));
-  EXPECT_EQ(slice2->slice_limits(), std::vector<int64>({2, 9}));
-  EXPECT_EQ(slice2->slice_strides(), std::vector<int64>({1, 1}));
-  HloInstruction* slice3 = inst->mutable_operand(3);
-  EXPECT_EQ(slice3->slice_starts(), std::vector<int64>({2, 0}));
-  EXPECT_EQ(slice3->slice_limits(), std::vector<int64>({8, 9}));
-  EXPECT_EQ(slice3->slice_strides(), std::vector<int64>({1, 1}));
 }
 
 }  // namespace
