@@ -44,7 +44,7 @@ namespace m = match;
 class SliceSinkerTest : public HloTestBase {
 };
 
-TEST_F(SliceSinkerTest, Basic) {
+TEST_F(SliceSinkerTest, TernaryOperation) {
   const char* kModuleStr = R"(
     HloModule m
     test {
@@ -87,7 +87,7 @@ TEST_F(SliceSinkerTest, Basic) {
   EXPECT_EQ(slice1->slice_strides(), std::vector<int64>({1, 1}));
 }
 
-TEST_F(SliceSinkerTest, PartialButOverlappingSlicesTransformed) {
+TEST_F(SliceSinkerTest, OverlappingPartialSlicesBeneficial) {
   const char* kModuleStr = R"(
     HloModule m
     test {
@@ -135,7 +135,7 @@ TEST_F(SliceSinkerTest, PartialButOverlappingSlicesTransformed) {
   EXPECT_EQ(slice2->slice_strides(), std::vector<int64>({1, 1}));
 }
 
-TEST_F(SliceSinkerTest, SplitDualDimension) {
+TEST_F(SliceSinkerTest, SameSliceSourcesTwoPeerGroups) {
   const char* kModuleStr = R"(
     HloModule m
     test {
@@ -191,7 +191,7 @@ TEST_F(SliceSinkerTest, SplitDualDimension) {
   EXPECT_EQ(slice3->slice_strides(), std::vector<int64>({1, 1}));
 }
 
-TEST_F(SliceSinkerTest, OverlapSlice) {
+TEST_F(SliceSinkerTest, OverlappingMultipleSlices) {
   const char* kModuleStr = R"(
     HloModule m
     test {
@@ -239,7 +239,7 @@ TEST_F(SliceSinkerTest, OverlapSlice) {
   EXPECT_EQ(slice2->slice_strides(), std::vector<int64>({1, 1}));
 }
 
-TEST_F(SliceSinkerTest, PartialSplit) {
+TEST_F(SliceSinkerTest, DisjointedPartialSlices) {
   const char* kModuleStr = R"(
     HloModule m
     test {
@@ -262,7 +262,7 @@ TEST_F(SliceSinkerTest, PartialSplit) {
   EXPECT_FALSE(result);
 }
 
-TEST_F(SliceSinkerTest, PartialSlice) {
+TEST_F(SliceSinkerTest, OverlappingPartialSlicesNotBeneficial) {
   const char* kModuleStr = R"(
     HloModule m
     test {
@@ -285,7 +285,7 @@ TEST_F(SliceSinkerTest, PartialSlice) {
   EXPECT_FALSE(result);
 }
 
-TEST_F(SliceSinkerTest, OperantDisorder) {
+TEST_F(SliceSinkerTest, DifferentOrderingOfSliceSources) {
   const char* kModuleStr = R"(
     HloModule m
     test {
@@ -308,7 +308,7 @@ TEST_F(SliceSinkerTest, OperantDisorder) {
   EXPECT_FALSE(result);
 }
 
-TEST_F(SliceSinkerTest, SliceDisorder) {
+TEST_F(SliceSinkerTest, SlicesFromDifferentIndices) {
   const char* kModuleStr = R"(
     HloModule m
     test {
@@ -354,7 +354,7 @@ TEST_F(SliceSinkerTest, DifferentOperator) {
   EXPECT_FALSE(result);
 }
 
-TEST_F(SliceSinkerTest, MultiUsers) {
+TEST_F(SliceSinkerTest, SlicesWithMultiUsers) {
   const char* kModuleStr = R"(
     HloModule m
     test {
@@ -426,7 +426,7 @@ TEST_F(SliceSinkerTest, NonElementWise) {
   EXPECT_FALSE(result);
 }
 
-TEST_F(SliceSinkerTest, Stride) {
+TEST_F(SliceSinkerTest, SlicesWithNontrivialStrides) {
   const char* kModuleStr = R"(
     HloModule m
     test {
