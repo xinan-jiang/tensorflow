@@ -34,6 +34,9 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/shape_inference.h"
 #include "tensorflow/compiler/xla/util.h"
 
+//#include "tensorflow/compiler/xla/service/hlo_proto_util.h"
+//#include "tensorflow/compiler/xla/service/hlo_graph_dumper.h"
+
 namespace xla {
 
 using absl::StrCat;
@@ -306,13 +309,37 @@ StatusOr<XlaComputation> XlaBuilder::Build(int64 root_id) {
   module->set_entry_computation_name(entry.name());
   module->set_entry_computation_id(entry.id());
   *module->mutable_host_program_shape() = entry.program_shape();
+// dump
+//  TF_ASSIGN_OR_RETURN(std::unique_ptr<HloModule> module_0,
+//                      CreateModuleFromProto(module, *module_config));
+//  hlo_graph_dumper::MaybeDumpHloModule(*module_0, "build-module-0");
+  VLOG(0) << module->DebugString();
+// end dump
   for (auto& e : embedded_) {
     module->add_computations()->Swap(&e.second);
   }
+// dump
+//  TF_ASSIGN_OR_RETURN(std::unique_ptr<HloModule> module_1,
+//                      CreateModuleFromProto(module, *module_config));
+//  hlo_graph_dumper::MaybeDumpHloModule(*module_1, "build-module-1");
+  VLOG(0) << module->DebugString();
+// end dump
   module->add_computations()->Swap(&entry);
+// dump
+//  TF_ASSIGN_OR_RETURN(std::unique_ptr<HloModule> module_2,
+//                      CreateModuleFromProto(module, *module_config));
+//  hlo_graph_dumper::MaybeDumpHloModule(*module_2, "build-module-2");
+  VLOG(0) << module->DebugString();
+// end dump
 
   *(module->mutable_dynamic_parameter_binding()) =
       dynamic_parameter_binding_.ToProto();
+// dump
+//  TF_ASSIGN_OR_RETURN(std::unique_ptr<HloModule> module_3,
+//                      CreateModuleFromProto(module, *module_config));
+//  hlo_graph_dumper::MaybeDumpHloModule(*module_3, "build-module-3");
+  VLOG(0) << module->DebugString();
+// end dump
 
   // Clear data held by this builder.
   this->instructions_.clear();

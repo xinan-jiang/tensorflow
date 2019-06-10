@@ -663,6 +663,8 @@ StatusOr<std::unique_ptr<Executable>> NVPTXCompiler::RunBackend(
     VLOG(3) << "LLVM module before optimizations:";
     XLA_VLOG_LINES(3, ir_module_string_before_opt);
   }
+  VLOG(3) << "LLVM module before optimizations:";
+  VLOG(0) << ir_module_string_before_opt;
 
   const string& ir_dump_directory =
       module->config().debug_options().xla_dump_ir_to();
@@ -729,10 +731,16 @@ StatusOr<std::unique_ptr<Executable>> NVPTXCompiler::RunBackend(
   if (user_post_optimization_hook_) {
     TF_CHECK_OK(user_post_optimization_hook_(llvm_module));
   }
+/*
   VLOG(3) << "LLVM module after optimizations:";
   XLA_VLOG_LINES(3, llvm_ir::DumpModuleToString(llvm_module));
   VLOG(3) << "PTX:";
   XLA_VLOG_LINES(3, ptx);
+*/
+  VLOG(0) << "LLVM module after optimizations:";
+  VLOG(0) << llvm_ir::DumpModuleToString(llvm_module);
+  VLOG(0) << "PTX:";
+  VLOG(0) << ptx;
 
   // Write PTX to IR dump directory, if IR dumping was requested.
   if (!ir_dump_directory.empty()) {

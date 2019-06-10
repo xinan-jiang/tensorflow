@@ -42,6 +42,8 @@ limitations under the License.
 #include "tensorflow/core/util/dump_graph.h"
 #include "tensorflow/core/util/ptr_util.h"
 
+#include "tensorflow/core/util/dump_graph.h"
+
 namespace tensorflow {
 namespace grappler {
 
@@ -341,9 +343,10 @@ Status MetaOptimizer::OptimizeGraph(Cluster* cluster, const GrapplerItem& item,
       break;
     }
 
-    VLOG(4) << "Starting optimization iteration " << iteration;
+    VLOG(0) << "Starting optimization iteration " << iteration;
     for (const auto& optimizer : optimizers) {
       GRAPPLER_RETURN_IF_DEADLINE_EXCEEDED();
+tensorflow::DumpGraphDefToFile(optimizer->name(), *optimized_graph, "tmp/core_graph");
       // Some optimizers can run only once.
       if (iteration > 0 && IsRunOnceOptimizer(optimizer->name())) continue;
       // Some must run only on the last iteration.
@@ -366,11 +369,13 @@ Status MetaOptimizer::OptimizeGraph(Cluster* cluster, const GrapplerItem& item,
   // optimizations from taking place since we don't have shape inference for
   // functions, and we can't optimize across function boundaries.
   if (fusion_optimizer != nullptr) {
+tensorflow::DumpGraphDefToFile(fusion_optimizer->name(), *optimized_graph, "tmp/core_graph");
     RUN_OPTIMIZER_OR_RETURN_IF_ERROR(fusion_optimizer);
   }
 
   // ScopedAllocatorOptimizer must run last.
   if (sa_optimizer != nullptr) {
+tensorflow::DumpGraphDefToFile(sa_optimizer->name(), *optimized_graph, "tmp/core_graph");
     RUN_OPTIMIZER_OR_RETURN_IF_ERROR(sa_optimizer);
   }
 

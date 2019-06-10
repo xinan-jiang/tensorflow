@@ -41,6 +41,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/source_map_util.h"
 #include "tensorflow/compiler/xla/service/stream_pool.h"
 #include "tensorflow/compiler/xla/service/transfer_manager.h"
+#include "tensorflow/compiler/xla/service/hlo_graph_dumper.h"
 #include "tensorflow/compiler/xla/shape.h"
 #include "tensorflow/compiler/xla/shape_layout.h"
 #include "tensorflow/compiler/xla/shape_util.h"
@@ -787,6 +788,8 @@ StatusOr<std::unique_ptr<Executable>> Service::BuildExecutable(
 
   TF_ASSIGN_OR_RETURN(std::unique_ptr<HloModule> module,
                       CreateModuleFromProto(module_proto, *module_config));
+
+  hlo_graph_dumper::MaybeDumpHloModule(*module, "Service:BuildExecutable");
 
   TF_RETURN_IF_ERROR(MaybeDumpUnoptimizedHloModule(*module));
 

@@ -120,9 +120,10 @@ void HloPassPipeline::MaybeDumpHlo(const HloModule& module,
   const string message =
       absl::StrCat("after ", after_pass_name, ", before ", before_pass_name);
   hlo_graph_dumper::MaybeDumpHloModule(module, message);
-  VLOG(3) << "HLO " << message << ":";
-  VLOG(3) << module.entry_computation_layout().ToString();
-  XLA_VLOG_LINES(3, module.ToString());
+  VLOG(0) << "HLO " << message << ":";
+  VLOG(0) << module.entry_computation_layout().ToString();
+//  XLA_VLOG_LINES(3, module.ToString());
+  VLOG(0) << module.ToString();
 }
 
 void HloPassPipeline::MaybeDumpHlo(const HloModuleGroup& module_group,

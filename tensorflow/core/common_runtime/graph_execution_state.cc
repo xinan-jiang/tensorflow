@@ -46,6 +46,8 @@ limitations under the License.
 #include "tensorflow/core/util/device_name_utils.h"
 #include "tensorflow/core/util/util.h"
 
+#include "tensorflow/core/util/dump_graph.h"
+
 #ifndef IS_MOBILE_PLATFORM
 #include "tensorflow/core/grappler/clusters/virtual_cluster.h"
 #include "tensorflow/core/grappler/grappler_item.h"
@@ -78,6 +80,7 @@ GraphExecutionState::~GraphExecutionState() {
 /* static */ Status GraphExecutionState::MakeForBaseGraph(
     GraphDef* graph_def, const GraphExecutionStateOptions& options,
     std::unique_ptr<GraphExecutionState>* out_state) {
+VLOG(0) << "MakeForBaseGraph";
 #ifndef __ANDROID__
   VLOG(4) << "Graph proto is \n" << graph_def->DebugString();
 #endif  // __ANDROID__
@@ -94,6 +97,7 @@ GraphExecutionState::~GraphExecutionState() {
     TF_RETURN_IF_ERROR(ret->InitBaseGraph(BuildGraphOptions()));
   }
   *out_state = std::move(ret);
+VLOG(0) << "MakeForBaseGraphDone";
   return Status::OK();
 }
 
@@ -103,6 +107,7 @@ GraphExecutionState::~GraphExecutionState() {
     const BuildGraphOptions& subgraph_options,
     std::unique_ptr<GraphExecutionState>* out_state,
     std::unique_ptr<ClientGraph>* out_client_graph) {
+VLOG(0) << "MakeForPrunedGraph";
   DCHECK(options.session_options->config.graph_options().place_pruned_graph());
   // NOTE(mrry): This makes a copy of `graph_def`, which is
   // regrettable. We could make `GraphDef` objects sharable between
@@ -119,12 +124,14 @@ GraphExecutionState::~GraphExecutionState() {
   TF_RETURN_IF_ERROR(ret->InitBaseGraph(subgraph_options));
   TF_RETURN_IF_ERROR(ret->BuildGraph(subgraph_options, out_client_graph));
   *out_state = std::move(ret);
+VLOG(0) << "MakeForPrunedGraphDone";
   return Status::OK();
 }
 
 Status GraphExecutionState::Extend(
     const GraphDef& extension_def,
     std::unique_ptr<GraphExecutionState>* out) const {
+VLOG(0) << "Extend";
   GraphDef gdef;
 
   // 1. Copy the function library.
@@ -215,6 +222,7 @@ Status GraphExecutionState::Extend(
   }
   *out = std::move(new_execution_state);
 
+VLOG(0) << "ExtendDone";
   // TODO(mrry): This is likely to be used for non-throughput-sensitive
   // interactive workloads, but in future we may want to transfer other
   // parts of the placement and/or cost model.
@@ -437,6 +445,7 @@ Status GetFeedShapeAndTypeFromAttribute(const NodeDef& node,
 Status GraphExecutionState::PruneGraph(
     const BuildGraphOptions& options, Graph* graph,
     subgraph::RewriteGraphMetadata* out_rewrite_metadata) {
+VLOG(0) << "PruneGraph";
   std::vector<std::unique_ptr<subgraph::PruneRewrite>> feed_rewrites;
   feed_rewrites.reserve(options.callable_options.feed_size());
   std::vector<std::unique_ptr<subgraph::PruneRewrite>> fetch_rewrites;
@@ -537,15 +546,18 @@ Status GraphExecutionState::PruneGraph(
   for (int i = 0; i < options.callable_options.tensor_connection_size(); ++i) {
     out_rewrite_metadata->feed_types.pop_back();
   }
+VLOG(0) << "PruneGraphDone";
   return Status::OK();
 }
 
 Status GraphExecutionState::InitBaseGraph(const BuildGraphOptions& options) {
   const GraphDef* graph_def = &original_graph_def_;
+VLOG(0) << "InitBaseGraph (" << this << ")";
 
   std::unique_ptr<Graph> new_graph(new Graph(OpRegistry::Global()));
   GraphConstructorOptions opts;
   TF_RETURN_IF_ERROR(ConvertGraphDefToGraph(opts, *graph_def, new_graph.get()));
+DumpGraphToFile("init_base_graph", *new_graph, nullptr, "tmp/core_graph");
   if (session_options_ &&
       session_options_->config.graph_options().place_pruned_graph()) {
     // Rewrite the graph before placement.
@@ -566,13 +578,16 @@ Status GraphExecutionState::InitBaseGraph(const BuildGraphOptions& options) {
   TF_RETURN_IF_ERROR(OptimizationPassRegistry::Global()->RunGrouping(
       OptimizationPassRegistry::PRE_PLACEMENT, optimization_options));
 
+DumpGraphToFile("before_placer", *new_graph, nullptr, "tmp/core_graph");
   Placer placer(new_graph.get(), device_set_, session_options_,
                 /* default_device= */ nullptr);
   // TODO(mrry): Consider making the Placer cancelable.
   TF_RETURN_IF_ERROR(placer.Run());
+DumpGraphToFile("after_placer", *new_graph, nullptr, "tmp/core_graph");
 
   TF_RETURN_IF_ERROR(OptimizationPassRegistry::Global()->RunGrouping(
       OptimizationPassRegistry::POST_PLACEMENT, optimization_options));
+DumpGraphToFile("post_placement", *new_graph, nullptr, "tmp/core_graph");
 
   for (const Node* n : new_graph->nodes()) {
     VLOG(2) << "Mapping " << n->name() << " to " << n->cost_id();
@@ -581,12 +596,16 @@ Status GraphExecutionState::InitBaseGraph(const BuildGraphOptions& options) {
 
   SaveStatefulNodes(new_graph.get());
   graph_ = new_graph.release();
+DumpGraphToFile("internal_graph", *graph_, nullptr, "tmp/core_graph");
+VLOG(0) << "graph_ptr " << graph_; 
+VLOG(0) << "InitBaseGraphDone";
   return Status::OK();
 }
 
 Status GraphExecutionState::OptimizeGraph(
     const BuildGraphOptions& options, std::unique_ptr<Graph>* optimized_graph,
     std::unique_ptr<FunctionLibraryDefinition>* optimized_flib) {
+VLOG(0) << "OptimizeGraph";
 #ifndef IS_MOBILE_PLATFORM
   if (session_options_->config.graph_options().place_pruned_graph()) {
     return errors::InvalidArgument("Can't optimize a pruned graph");
@@ -716,6 +735,7 @@ Status GraphExecutionState::OptimizeGraph(
     for (Node* node : optimized_graph->get()->nodes()) {
       node->set_assigned_device_name(node->requested_device());
     }
+VLOG(0) << "OptimizeGraphDone";
     return Status::OK();
   } else {
     return errors::InvalidArgument("Meta Optimizer disabled");
@@ -727,7 +747,8 @@ Status GraphExecutionState::OptimizeGraph(
 
 Status GraphExecutionState::BuildGraph(const BuildGraphOptions& options,
                                        std::unique_ptr<ClientGraph>* out) {
-  VLOG(1) << "BuildGraph";
+  VLOG(0) << "BuildGraph (" << this << ")";
+VLOG(0) << "graph_ptr " << graph_; 
   if (!graph_) {
     // It is only valid to call this method directly when the original graph
     // was created with the option `place_pruned_graph == false`.
@@ -740,6 +761,7 @@ Status GraphExecutionState::BuildGraph(const BuildGraphOptions& options,
   std::unique_ptr<Graph> optimized_graph;
   std::unique_ptr<FunctionLibraryDefinition> optimized_flib;
 
+DumpGraphToFile("before_optimize", *graph_, nullptr, "tmp/core_graph");
   Status s = OptimizeGraph(options, &optimized_graph, &optimized_flib);
   if (!s.ok()) {
     VLOG(2) << "Grappler optimization failed. Error: " << s.error_message();
@@ -749,6 +771,7 @@ Status GraphExecutionState::BuildGraph(const BuildGraphOptions& options,
     CopyGraph(*graph_, optimized_graph.get());
     optimized_flib.reset(new FunctionLibraryDefinition(*flib_def_));
   }
+DumpGraphToFile("after_optimize", *optimized_graph, nullptr, "tmp/core_graph");
 
   subgraph::RewriteGraphMetadata rewrite_metadata;
   if (session_options_ == nullptr ||
@@ -762,6 +785,7 @@ Status GraphExecutionState::BuildGraph(const BuildGraphOptions& options,
     CHECK(rewrite_metadata_);
     rewrite_metadata = *rewrite_metadata_;
   }
+DumpGraphToFile("after_prune", *optimized_graph, nullptr, "tmp/core_graph");
 
   CHECK_EQ(options.callable_options.feed_size(),
            rewrite_metadata.feed_types.size());
@@ -775,6 +799,7 @@ Status GraphExecutionState::BuildGraph(const BuildGraphOptions& options,
   optimization_options.flib_def = optimized_flib.get();
   optimization_options.device_set = device_set_;
 
+DumpGraphToFile("before_rewrite", *optimized_graph, nullptr, "tmp/core_graph");
   TF_RETURN_IF_ERROR(OptimizationPassRegistry::Global()->RunGrouping(
       OptimizationPassRegistry::POST_REWRITE_FOR_EXEC, optimization_options));
 
@@ -827,7 +852,10 @@ Status GraphExecutionState::BuildGraph(const BuildGraphOptions& options,
   // TODO(vrv): We should check invariants of the graph here.
 
   *out = std::move(dense_copy);
+  VLOG(0) << "BuildGraphDone";
   return Status::OK();
 }
+
+
 
 }  // namespace tensorflow

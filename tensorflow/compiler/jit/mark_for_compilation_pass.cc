@@ -457,14 +457,14 @@ Status FindCompilationCandidates(
   if (fuel >= std::numeric_limits<int64>::max() / 2) {
     // The assumption is that if fuel started out as INT64_MAX, it will forever
     // stay greater than INT64_MAX / 2.
-    VLOG(2) << "Starting fuel: infinity";
+    VLOG(0) << "Starting fuel: infinity";
   } else {
-    VLOG(2) << "Starting fuel: " << fuel;
+    VLOG(0) << "Starting fuel: " << fuel;
   }
 
   for (Node* node : sorted_nodes) {
     if (fuel <= 0) {
-      VLOG(1)
+      VLOG(0)
           << "Hit fuel limit; not marking any remaining ops as clusterable.";
       break;
     }
@@ -477,6 +477,7 @@ Status FindCompilationCandidates(
 
     if (is_compilable_fn && !is_compilable_fn(node, device_type)) {
       // is_compilable_fn has already logged the reason if it returned false.
+      VLOG(0) << "Rejecting " << node->name() << ": is is_compilable_fn";
       continue;
     }
 
@@ -490,6 +491,7 @@ Status FindCompilationCandidates(
 
     OperationFilter op_filter;
     op_filter.allow_resource_ops = registration->compile_resource_ops;
+//    op_filter.allow_stateful_rng_ops = true;//always_auto_cluster;
     op_filter.allow_stateful_rng_ops = always_auto_cluster;
     op_filter.allow_control_trigger = always_auto_cluster;
     op_filter.allow_dummy_ops = always_auto_cluster;
@@ -498,28 +500,28 @@ Status FindCompilationCandidates(
     if (!HasXLAKernel(*node, jit_device_type) &&
         !IsCompilableCall(node->def(), jit_device_type, op_filter, 0,
                           lib_runtime)) {
-      VLOG(2) << "Rejecting " << node->name() << ": unsupported op "
+      VLOG(0) << "Rejecting " << node->name() << ": unsupported op "
               << node->type_string();
       continue;
     }
 
     if (!op_filter.allow_stateful_rng_ops &&
         IsStatefulRandomOp(node->type_string())) {
-      VLOG(2) << "Rejecting " << node->name() << ": stateful random operation";
+      VLOG(0) << "Rejecting " << node->name() << ": stateful random operation";
       continue;
     }
     if (!op_filter.allow_control_trigger && node->IsControlTrigger()) {
-      VLOG(2) << "Rejecting " << node->name() << ": is a control trigger op";
+      VLOG(0) << "Rejecting " << node->name() << ": is a control trigger op";
       continue;
     }
     if (!op_filter.allow_dummy_ops && IsDummyImplOp(node->type_string())) {
-      VLOG(2) << "Rejecting " << node->name() << ": dummy op ("
+      VLOG(0) << "Rejecting " << node->name() << ": dummy op ("
               << node->type_string() << ")";
       continue;
     }
     if (!op_filter.allow_ops_producing_or_consuming_variant &&
         OpProducesOrConsumesVariant(*node)) {
-      VLOG(2) << "Rejecting " << node->name()
+      VLOG(0) << "Rejecting " << node->name()
               << ": produces or consumes DT_VARIANT";
       continue;
     }
@@ -531,7 +533,7 @@ Status FindCompilationCandidates(
       // XlaLaunchOp also cannot snapshot resources that are not resource
       // variables so we avoid clustering resource operations that operate on
       // non-resource variables.
-      VLOG(2) << "Rejecting: " << node->name() << ": resource output "
+      VLOG(0) << "Rejecting: " << node->name() << ": resource output "
               << node->type_string();
       continue;
     }
@@ -581,7 +583,7 @@ Status FindCompilationCandidates(
         bool is_tensor_array_or_stack_op =
             op_info && op_info->resource_kind() != XlaResourceKind::kVariable;
         if (!is_tensor_array_or_stack_op) {
-          VLOG(2) << "Isolating " << node->name()
+          VLOG(0) << "Isolating " << node->name()
                   << ": must-be-constant stateful op";
           isolated_nodes->insert(node);
           // Keep going and execute all the other checks.
@@ -594,16 +596,19 @@ Status FindCompilationCandidates(
     // for CPU/GPU.
     if (node->type_string() == "While" &&
         !IsCompilableWhile(*node, jit_device_type, op_filter, 0, lib_runtime)) {
+      VLOG(0) << "Rejecting " << node->name() << ": is unCompilableWhile";
       continue;
     }
     // _Arg nodes in a top-level function represent feeds.
     // Do not compile them.
     if (node->type_string() == "_Arg") {
+      VLOG(0) << "Rejecting " << node->name() << ": is arg";
       continue;
     }
     // _Retval nodes in a top-level function represent fetches.
     // Do not compile them.
     if (node->type_string() == "_Retval") {
+      VLOG(0) << "Rejecting " << node->name() << ": is retval";
       continue;
     }
     candidates->insert(node);
@@ -670,6 +675,9 @@ Status MarkForCompilationPass::Run(
   // device ahead of time.
   OptimizerOptions::GlobalJitLevel global_jit_level =
       GetGlobalJitLevel(options);
+  if (global_jit_level > 0) {
+    VLOG(0) << "global_jit_level enabled";
+  }
   MarkForCompilationPassFlags* flags = GetMarkForCompilationPassFlags();
   bool fusion_only = flags->tf_xla_fusion_only;
 
@@ -696,7 +704,7 @@ Status MarkForCompilationPass::Run(
     Status status = GetNodeAttr(node->attrs(), kXlaCompileAttr, &compile);
     if (status.ok()) {
       if (!compile) {
-        VLOG(2) << "Rejecting " << node->name() << ": kXlaCompileAttr("
+        VLOG(0) << "Rejecting " << node->name() << ": kXlaCompileAttr("
                 << kXlaCompileAttr << ") is false.";
       }
       return compile;
@@ -705,7 +713,7 @@ Status MarkForCompilationPass::Run(
     status = fld->GetAttr(*node, kXlaCompileAttr, &compile);
     if (status.ok()) {
       if (!compile) {
-        VLOG(2) << "Rejecting " << node->name() << ": kXlaCompileAttr("
+        VLOG(0) << "Rejecting " << node->name() << ": kXlaCompileAttr("
                 << kXlaCompileAttr << ") on callee is false.";
       }
       return compile;
@@ -716,13 +724,13 @@ Status MarkForCompilationPass::Run(
     // deadness semantics of these nodes correctly and auto-clustering these
     // nodes can cause deadness to propagate to nodes that should be live.
     if (node->IsMerge() || deadness->HasInputsWithMismatchingDeadness(*node)) {
-      VLOG(2) << "Rejecting " << node->name() << ": mismatching deadness.";
+      VLOG(0) << "Rejecting " << node->name() << ": mismatching deadness.";
       return false;
     }
 
     // Check for fusable ops only if requested.
     if (global_jit_level > 0 && fusion_only && !IsXlaFusable(node->def())) {
-      VLOG(2) << "Rejecting " << node->name()
+      VLOG(0) << "Rejecting " << node->name()
               << ": not fusable op but fusion_only enabled.";
       return false;
     }
@@ -737,9 +745,9 @@ Status MarkForCompilationPass::Run(
          global_jit_level != OptimizerOptions::OFF);
     if (!should_compile) {
       if (global_jit_level == OptimizerOptions::OFF) {
-        VLOG(2) << "Rejecting " << node->name() << ": global jit disabled.";
+        VLOG(0) << "Rejecting " << node->name() << ": global jit disabled.";
       } else {
-        VLOG(2)
+        VLOG(0)
             << "Rejecting " << node->name()
             << ": autoclustering for device only when requested explicitly.";
       }
@@ -755,7 +763,7 @@ static string RatioToString(int numerator, int denominator) {
 }
 
 static void VLogClusteringSummary(const Graph& g) {
-  if (!VLOG_IS_ON(2)) {
+  if (!VLOG_IS_ON(0)) {
     return;
   }
 
@@ -778,27 +786,27 @@ static void VLogClusteringSummary(const Graph& g) {
 
   int unclustered_node_count = g.num_nodes() - clustered_node_count;
 
-  VLOG(2) << "*** Clustering info for graph of size " << g.num_nodes();
-  VLOG(2) << " Built " << cluster_name_to_size.size() << " clusters, size "
+  VLOG(0) << "*** Clustering info for graph of size " << g.num_nodes();
+  VLOG(0) << " Built " << cluster_name_to_size.size() << " clusters, size "
           << RatioToString(clustered_node_count, g.num_nodes());
 
   for (const auto& cluster_name_size_pair : cluster_name_to_size) {
     absl::string_view cluster_name = cluster_name_size_pair.first;
     int size = cluster_name_size_pair.second;
-    VLOG(2) << "  " << cluster_name << " "
+    VLOG(0) << "  " << cluster_name << " "
             << RatioToString(size, g.num_nodes());
     for (const auto& op_count_pair :
          cluster_name_to_op_histogram[cluster_name]) {
-      VLOG(3) << "   " << op_count_pair.first << ": " << op_count_pair.second
+      VLOG(0) << "   " << op_count_pair.first << ": " << op_count_pair.second
               << " instances";
     }
   }
 
   if (!unclustered_op_histogram.empty()) {
-    VLOG(2) << " Unclustered nodes: "
+    VLOG(0) << " Unclustered nodes: "
             << RatioToString(unclustered_node_count, g.num_nodes());
     for (const auto& pair : unclustered_op_histogram) {
-      VLOG(3) << "  " << pair.first << ": " << pair.second << " instances";
+      VLOG(0) << "  " << pair.first << ": " << pair.second << " instances";
     }
   }
 
@@ -852,9 +860,9 @@ static void VLogClusteringSummary(const Graph& g) {
     }
   }
 
-  VLOG(2) << "*** Inter-Cluster edges:";
+  VLOG(0) << "*** Inter-Cluster edges:";
   if (cluster_names_to_print.empty()) {
-    VLOG(2) << "   [none]";
+    VLOG(0) << "   [none]";
   }
 
   auto print_edge_info_set_for_cluster = [&](absl::string_view cluster_name,
@@ -862,19 +870,19 @@ static void VLogClusteringSummary(const Graph& g) {
                                              absl::string_view desc) {
     auto it = edge_info_map.find(cluster_name);
     if (it != edge_info_map.end()) {
-      VLOG(2) << "  " << it->second.size() << " " << desc << " edges";
+      VLOG(0) << "  " << it->second.size() << " " << desc << " edges";
       for (const auto& edge_info_count_pair : it->second) {
-        VLOG(2) << "   " << edge_info_count_pair.first.GetClusterName() << " "
+        VLOG(0) << "   " << edge_info_count_pair.first.GetClusterName() << " "
                 << edge_info_count_pair.first.node_name << " # "
                 << edge_info_count_pair.second;
       }
     } else {
-      VLOG(2) << "  No " << desc << " edges.";
+      VLOG(0) << "  No " << desc << " edges.";
     }
   };
 
   for (absl::string_view cluster_name : cluster_names_to_print) {
-    VLOG(2) << " ** Cluster " << cluster_name;
+    VLOG(0) << " ** Cluster " << cluster_name;
     print_edge_info_set_for_cluster(cluster_name, incoming_edge_infos,
                                     "incoming");
     print_edge_info_set_for_cluster(cluster_name, outgoing_edge_infos,
@@ -933,12 +941,13 @@ Status MarkForCompilationPass::RunImpl(
     const GraphOptimizationPassOptions& options,
     const std::function<bool(const Node*, const DeviceType&)>&
         is_compilable_fn) {
-  VLOG(1) << "MarkForCompilationPass::Run";
+  VLOG(0) << "MarkForCompilationPass::Run";
 
   // Make sure that kernels have been registered on the JIT device.
   XlaOpRegistry::RegisterCompilationKernels();
 
   Graph* graph = options.graph->get();
+  dump_graph::DumpGraphToFile("before_mark_whole", *graph);
 
   OrderedNodeSet compilation_candidates;
   absl::flat_hash_set<Node*> isolated_nodes;
@@ -949,7 +958,7 @@ Status MarkForCompilationPass::RunImpl(
       is_compilable_fn, &compilation_candidates, &isolated_nodes));
 
   if (compilation_candidates.empty()) {
-    VLOG(2) << "No compilable candidates";
+    VLOG(0) << "No compilable candidates";
     return Status::OK();
   }
 
@@ -964,6 +973,7 @@ Status MarkForCompilationPass::RunImpl(
   std::vector<UnionFind<Cluster>> clusters(graph->num_node_ids());
   std::deque<UnionFind<Cluster>*> worklist;
   for (Node* node : compilation_candidates) {
+  VLOG(0) << node->DebugString() << " is compilation_candidates";
     Cluster& cluster = clusters[node->id()].Get();
     cluster.representative = node->id();
     worklist.push_back(&clusters[node->id()]);
@@ -992,6 +1002,7 @@ Status MarkForCompilationPass::RunImpl(
     }
 
     if (isolated_nodes.count(node_from)) {
+  VLOG(0) << node_from->type_string() << " is isolated node";
       continue;
     }
 
@@ -1140,11 +1151,13 @@ Status MarkForCompilationPass::RunImpl(
       n->AddAttr(kXlaClusterAttr, name);
       VLOG(3) << "Assigning node " << n->name() << " to cluster " << name;
     }
+  VLOG(0) << n->DebugString() << " in cluster " << cluster;
   }
 
   if (flags->tf_xla_clustering_debug) {
     dump_graph::DumpGraphToFile("mark_for_compilation", **options.graph,
                                 options.flib_def);
+    dump_graph::DumpGraphToFile("mark_whole", *graph);
   }
 
   VLogClusteringSummary(*graph);

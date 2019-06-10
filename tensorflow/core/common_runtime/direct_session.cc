@@ -278,6 +278,7 @@ DirectSession::DirectSession(const SessionOptions& options,
       factory_(factory),
       cancellation_manager_(new CancellationManager()),
       operation_timeout_in_ms_(options_.config.operation_timeout_in_ms()) {
+VLOG(0) << "Construction";
   const int thread_pool_size =
       options_.config.session_inter_op_thread_pool_size();
   if (thread_pool_size > 0) {
@@ -328,9 +329,11 @@ DirectSession::DirectSession(const SessionOptions& options,
     }
     ++devices_added;
   }
+VLOG(0) << "ConstructionDone";
 }
 
 DirectSession::~DirectSession() {
+VLOG(0) << "Deconstruction";
   if (!closed_) Close().IgnoreError();
   for (auto& it : partial_runs_) {
     it.second.reset(nullptr);
@@ -353,10 +356,12 @@ DirectSession::~DirectSession() {
 
   execution_state_.reset(nullptr);
   flib_def_.reset(nullptr);
+VLOG(0) << "DeconstructionDone";
 }
 
 Status DirectSession::MaybeInitializeExecutionState(
     const GraphDef& graph, bool* out_already_initialized) {
+VLOG(0) << "MaybeInitializeExecutionState";
   // If already initialized, do nothing.
   if (flib_def_ && execution_state_) {
     *out_already_initialized = true;
@@ -383,10 +388,12 @@ Status DirectSession::MaybeInitializeExecutionState(
       GraphExecutionState::MakeForBaseGraph(&temp, options, &execution_state_));
   graph_created_ = true;
   *out_already_initialized = false;
+VLOG(0) << "MaybeInitializeExecutionStateDone";
   return Status::OK();
 }
 
 Status DirectSession::Create(const GraphDef& graph) {
+VLOG(0) << "Create";
   TF_RETURN_IF_ERROR(init_error_);
   if (graph.node_size() > 0) {
     mutex_lock l(graph_state_lock_);
@@ -396,16 +403,19 @@ Status DirectSession::Create(const GraphDef& graph) {
     }
     return ExtendLocked(graph);
   }
+VLOG(0) << "CreateDone";
   return Status::OK();
 }
 
 Status DirectSession::Extend(const GraphDef& graph) {
+VLOG(0) << "Extend (" << this << ")";
   TF_RETURN_IF_ERROR(CheckNotClosed());
   mutex_lock l(graph_state_lock_);
   return ExtendLocked(graph);
 }
 
 Status DirectSession::ExtendLocked(const GraphDef& graph) {
+VLOG(0) << "ExtendLocked";
   bool already_initialized;
   // If this is the first call, we can initialize the execution state
   // with `graph` and do not need to call `Extend()`.
@@ -417,6 +427,7 @@ Status DirectSession::ExtendLocked(const GraphDef& graph) {
     TF_RETURN_IF_ERROR(execution_state_->Extend(graph, &state));
     execution_state_.swap(state);
   }
+VLOG(0) << "ExtendLockedDone";
   return Status::OK();
 }
 
@@ -729,6 +740,7 @@ Status DirectSession::Run(const RunOptions& run_options,
                           const std::vector<string>& target_nodes,
                           std::vector<Tensor>* outputs,
                           RunMetadata* run_metadata) {
+VLOG(0) << "Run (" << this << ")";
   TF_RETURN_IF_ERROR(CheckNotClosed());
   TF_RETURN_IF_ERROR(CheckGraphCreated("Run()"));
   direct_session_runs->GetCell()->IncrementBy(1);
@@ -826,6 +838,7 @@ Status DirectSession::Run(const RunOptions& run_options,
     }
   }
 
+VLOG(0) << "RunDone";
   return Status::OK();
 }
 
@@ -833,6 +846,7 @@ Status DirectSession::PRunSetup(const std::vector<string>& input_names,
                                 const std::vector<string>& output_names,
                                 const std::vector<string>& target_nodes,
                                 string* handle) {
+VLOG(0) << "PRunSetup";
   TF_RETURN_IF_ERROR(CheckNotClosed());
   TF_RETURN_IF_ERROR(CheckGraphCreated("PRunSetup()"));
 
@@ -904,6 +918,7 @@ Status DirectSession::PRunSetup(const std::vector<string>& input_names,
   }
 
   *handle = run_state_args.handle;
+VLOG(0) << "PRunSetupDone";
   return Status::OK();
 }
 
@@ -1184,6 +1199,7 @@ Status DirectSession::CreateExecutors(
     std::unique_ptr<ExecutorsAndKeys>* out_executors_and_keys,
     std::unique_ptr<FunctionInfo>* out_func_info,
     RunStateArgs* run_state_args) {
+VLOG(0) << "CreateExecutors";
   BuildGraphOptions options;
   options.callable_options = callable_options;
   options.use_function_convention = !run_state_args->is_partial_run;
@@ -1332,6 +1348,7 @@ Status DirectSession::CreateExecutors(
 
   *out_executors_and_keys = std::move(ek);
   *out_func_info = std::move(func_info);
+VLOG(0) << "CreateExecutorsDone";
   return Status::OK();
 }
 
@@ -1339,6 +1356,7 @@ Status DirectSession::GetOrCreateExecutors(
     gtl::ArraySlice<string> inputs, gtl::ArraySlice<string> outputs,
     gtl::ArraySlice<string> target_nodes, ExecutorsAndKeys** executors_and_keys,
     RunStateArgs* run_state_args) {
+VLOG(0) << "GetOrCreateExecutors";
   int64 handle_name_counter_value = -1;
   if (LogMemory::IsEnabled() || run_state_args->is_partial_run) {
     handle_name_counter_value = handle_name_counter_.fetch_add(1);
@@ -1442,6 +1460,7 @@ Status DirectSession::GetOrCreateExecutors(
   executors_.emplace(key, insert_result.first->second);
   *executors_and_keys = insert_result.first->second.get();
 
+VLOG(0) << "GetOrCreateExecutorsDone";
   return Status::OK();
 }
 
@@ -1451,6 +1470,7 @@ Status DirectSession::CreateGraphs(
     std::unique_ptr<FunctionLibraryDefinition>* flib_def,
     RunStateArgs* run_state_args, DataTypeVector* input_types,
     DataTypeVector* output_types, int64* collective_graph_key) {
+VLOG(0) << "CreateGraphs";
   mutex_lock l(graph_state_lock_);
   std::unique_ptr<ClientGraph> client_graph;
 
@@ -1597,6 +1617,7 @@ Status DirectSession::CreateGraphs(
   *flib_def = std::move(client_graph->flib_def);
   std::swap(*input_types, client_graph->feed_types);
   std::swap(*output_types, client_graph->fetch_types);
+VLOG(0) << "CreateGraphsDone";
   return s;
 }
 
@@ -1710,6 +1731,7 @@ void DirectSession::WaitForNotification(RunState* run_state,
 
 Status DirectSession::MakeCallable(const CallableOptions& callable_options,
                                    CallableHandle* out_handle) {
+VLOG(0) << "MakeCallable";
   TF_RETURN_IF_ERROR(CheckNotClosed());
   TF_RETURN_IF_ERROR(CheckGraphCreated("MakeCallable()"));
 
@@ -1723,6 +1745,7 @@ Status DirectSession::MakeCallable(const CallableOptions& callable_options,
     *out_handle = next_callable_handle_++;
     callables_[*out_handle] = {std::move(ek), std::move(func_info)};
   }
+VLOG(0) << "MakeCallableDone";
   return Status::OK();
 }
 

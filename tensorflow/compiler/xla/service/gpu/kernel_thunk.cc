@@ -68,6 +68,8 @@ Status KernelThunk::Initialize(const GpuExecutable& executable,
 
 void KernelThunk::SetLaunchDimensions(const LaunchDimensions& launch_dims) {
   tensorflow::mutex_lock lock(mutex_);
+VLOG(0) << "Set kernel thunk dimension: " << kernel_name_ << " : "
+        << launch_dims.block_count() << " / " << launch_dims.threads_per_block();
   launch_dimensions_ = launch_dims;
 }
 
