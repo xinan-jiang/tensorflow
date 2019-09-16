@@ -2314,6 +2314,15 @@ llvm_ir::ElementGenerator ElementalIrEmitter::MakeElementGenerator(
                  const IrArray::Index& index) -> StatusOr<llvm::Value*> {
         return EmitElementalDynamicSlice(hlo, operand_to_generator, index);
       };
+    case HloOpcode::kDiagSlice:
+      return [this, hlo, &operand_to_generator](
+                 const IrArray::Index& index) -> StatusOr<llvm::Value*> {
+        auto* diag_slice = Cast<HloDiagSliceInstruction>(hlo);
+        IrArray::Index sliced_index = index.SourceIndexOfDiagSlice(
+            /*operand_shape=*/diag_slice->operand(0)->shape(),
+            /*strides=*/diag_slice->offset(), /*builder=*/b_);
+        return operand_to_generator.at(diag_slice->operand(0))(sliced_index);
+      };
 
     case HloOpcode::kGather:
       return [this, hlo, &operand_to_generator](

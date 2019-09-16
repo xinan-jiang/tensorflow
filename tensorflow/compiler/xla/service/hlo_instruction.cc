@@ -625,6 +625,13 @@ StatusOr<std::unique_ptr<HloInstruction>> HloInstruction::CreateFromProto(
       instruction = CreateReshape(shape, operands(0), inferred_dimension);
       break;
     }
+    case HloOpcode::kDiagSlice: {
+      TF_RET_CHECK(shape.IsArray() && operands(0)->shape().IsArray())
+          << "shape: " << ShapeUtil::HumanString(shape)
+          << " operand: " << ShapeUtil::HumanString(operands(0)->shape());
+      instruction = CreateDiagSlice(shape, operands(0), proto.offset());
+      break;
+    }
     default: {
       instruction = absl::WrapUnique(new HloInstruction(opcode, shape));
       for (const int64 operand_id : proto.operand_ids()) {
@@ -749,6 +756,7 @@ HloInstruction::CreateRngGetAndUpdateState(const Shape& shape, int64 delta) {
     case HloOpcode::kCopyDone:
     case HloOpcode::kCos:
     case HloOpcode::kClz:
+    case HloOpcode::kDiagSlice:
     case HloOpcode::kExp:
     case HloOpcode::kExpm1:
     case HloOpcode::kFloor:
@@ -1065,6 +1073,11 @@ HloInstruction::CreateDynamicUpdateSlice(
     absl::Span<HloInstruction* const> start_indices) {
   return absl::make_unique<HloDynamicUpdateSliceInstruction>(
       shape, operand, update, start_indices);
+}
+
+/* static */ std::unique_ptr<HloInstruction> HloInstruction::CreateDiagSlice(
+    const Shape& shape, HloInstruction* operand, int64 offset) {
+  return absl::make_unique<HloDiagSliceInstruction>(shape, operand, offset);
 }
 
 /* static */ std::unique_ptr<HloInstruction> HloInstruction::CreateConcatenate(
@@ -1482,6 +1495,7 @@ std::unique_ptr<HloInstruction> HloInstruction::CloneWithNewOperands(
     case HloOpcode::kCopyStart:
     case HloOpcode::kCopyDone:
     case HloOpcode::kCos:
+    case HloOpcode::kDiagSlice:
     case HloOpcode::kExp:
     case HloOpcode::kExpm1:
     case HloOpcode::kImag:
@@ -2823,6 +2837,8 @@ Status HloInstruction::Visit(DfsHloVisitorBase<HloInstructionPtr>* visitor) {
       return visitor->HandleDynamicSlice(this);
     case HloOpcode::kDynamicUpdateSlice:
       return visitor->HandleDynamicUpdateSlice(this);
+    case HloOpcode::kDiagSlice:
+      return visitor->HandleDiagSlice(this);
     case HloOpcode::kSort:
       return visitor->HandleSort(this);
     case HloOpcode::kInfeed:

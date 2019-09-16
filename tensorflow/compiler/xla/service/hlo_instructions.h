@@ -1651,6 +1651,32 @@ class HloRngGetAndUpdateStateInstruction : public HloInstruction {
   int64 delta_;
 };
 
+class HloDiagSliceInstruction : public HloInstruction {
+ public:
+  explicit HloDiagSliceInstruction(
+      const Shape& shape, HloInstruction* operand, int64 offset);
+  // Returns the offset value.
+  int64 offset() const { return offset_; }
+  void set_offset(int64 offset) { offset_ = offset; }
+  // Returns a serialized representation of this instruction.
+  HloInstructionProto ToProto() const override;
+
+ private:
+  std::vector<string> ExtraAttributesToStringImpl(
+      const HloPrintOptions& options) const override;
+  bool IdenticalSlowPath(
+      const HloInstruction& other,
+      const std::function<bool(const HloComputation*, const HloComputation*)>&
+          eq_computations) const override;
+  // Implementation for non-common logic of CloneWithNewOperands.
+  std::unique_ptr<HloInstruction> CloneWithNewOperandsImpl(
+      const Shape& shape, absl::Span<HloInstruction* const> new_operands,
+      HloCloneContext* context) const override;
+
+  // Describes the offset on minor dimension for a diag-slice.
+  int64 offset_;
+};
+
 }  // namespace xla
 
 #endif  // TENSORFLOW_COMPILER_XLA_SERVICE_HLO_INSTRUCTIONS_H_

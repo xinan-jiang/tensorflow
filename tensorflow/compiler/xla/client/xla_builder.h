@@ -629,6 +629,8 @@ class XlaBuilder {
 
   XlaOp GetDimensionSize(const XlaOp& operand, int64 dimension);
 
+  XlaOp DiagSlice(const XlaOp& operand, int64 offset = 0);
+
   StatusOr<XlaOp> AddInstruction(HloInstructionProto&& instr, HloOpcode opcode,
                                  absl::Span<const XlaOp> operands = {});
 
@@ -1041,6 +1043,8 @@ class XlaBuilder {
   friend XlaOp AfterAll(XlaBuilder* builder, absl::Span<const XlaOp> tokens);
 
   friend XlaOp GetDimensionSize(XlaOp operand, int64 dimension);
+
+  friend XlaOp DiagSlice(XlaOp operand, int64 offset);
 
  private:
   XlaOp ConditionalImpl(
@@ -1961,6 +1965,16 @@ XlaOp BatchNormGrad(XlaOp operand, XlaOp scale, XlaOp batch_mean,
 // Returns the size of the given dimension of the operand. The operand must be
 // array shaped.
 XlaOp GetDimensionSize(XlaOp operand, int64 dimension);
+
+// Enqueues a DiagSlice instruction onto the computation that slices the
+// diagonal part of the batched operand; e.g.
+//
+//        x
+//   [ 0 1 2 3 ]
+// y [ 4 5 6 7 ] => diag_slice => [ 0 5 a ]
+//   [ 8 9 a b ]
+//
+XlaOp DiagSlice(XlaOp operand, int64 offset = 0);
 
 // Implementation details below this point.
 //

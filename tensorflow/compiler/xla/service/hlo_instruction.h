@@ -659,6 +659,11 @@ class HloInstruction {
       const Shape& shape, HloInstruction* operand, HloInstruction* update,
       absl::Span<HloInstruction* const> start_indices);
 
+  // Creates a diagonal slice instruction, where the operand is sliced by the
+  // given offset.
+  static std::unique_ptr<HloInstruction> CreateDiagSlice(
+      const Shape& shape, HloInstruction* operand, int64 offset = 0);
+
   // Creates a concatenate instruction, where the operands are concatenated on
   // the provided dimension.
   static std::unique_ptr<HloInstruction> CreateConcatenate(

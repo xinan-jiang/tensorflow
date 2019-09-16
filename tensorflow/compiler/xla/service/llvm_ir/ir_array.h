@@ -128,6 +128,12 @@ class IrArray {
                              absl::Span<const int64> strides,
                              llvm::IRBuilder<>* builder) const;
 
+    // Given that "this" is the target index of a diagonal slice operation
+    // from `operand_shape` with offset on column, returns the source index.
+    Index SourceIndexOfDiagSlice(const Shape& operand_shape,
+                                 const int64 offset,
+                                 llvm::IRBuilder<>* builder) const;
+
     // Given that "this" is the target index of a transpose from `operand_shape`
     // to `shape` with the given dimension mapping, returns the source index.
     Index SourceIndexOfTranspose(const Shape& shape, const Shape& operand_shape,

@@ -1775,6 +1775,17 @@ bool HloParser::ParseInstructionRhs(HloComputation::Builder* builder,
           builder->AddInstruction(HloInstruction::CreateGetDimensionSize(
               shape, operands[0], (*dimensions)[0]));
       break;
+    case HloOpcode::kDiagSlice: {
+      optional<int64> offset;
+      attrs["offset"] = {/*required=*/true, AttrTy::kInt64, &offset};
+      if (!ParseOperands(&operands, /*expected_size=*/1) ||
+          !ParseAttributes(attrs)) {
+        return false;
+      }
+      instruction = builder->AddInstruction(HloInstruction::CreateDiagSlice(
+          shape, operands[0], *offset));
+      break;
+    }
   }
 
   instruction->SetAndSanitizeName(name);

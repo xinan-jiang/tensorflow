@@ -2420,6 +2420,18 @@ XlaOp XlaBuilder::GetDimensionSize(const XlaOp& operand, int64 dimension) {
   });
 }
 
+XlaOp XlaBuilder::DiagSlice(const XlaOp& operand, int64 offset) {
+  return ReportErrorOrReturn([&]() -> StatusOr<XlaOp> {
+    HloInstructionProto instr;
+    TF_ASSIGN_OR_RETURN(const auto& operand_shape, GetShape(operand));
+    TF_ASSIGN_OR_RETURN(Shape shape, ShapeInference::InferDiagSliceShape(
+                                         operand_shape, offset));
+    *instr.mutable_shape() = shape.ToProto();
+    instr.set_offset(offset);
+    return AddInstruction(std::move(instr), HloOpcode::kDiagSlice, {operand});
+  });
+}
+
 StatusOr<bool> XlaBuilder::IsConstant(const XlaOp& operand) const {
   TF_RETURN_IF_ERROR(first_error_);
 
@@ -3487,6 +3499,10 @@ XlaOp Iota(XlaBuilder* builder, const Shape& shape, int64 iota_dimension) {
 
 XlaOp GetDimensionSize(const XlaOp operand, int64 dimension) {
   return operand.builder()->GetDimensionSize(operand, dimension);
+}
+
+XlaOp DiagSlice(const XlaOp operand, int64 offset) {
+  return operand.builder()->DiagSlice(operand, offset);
 }
 
 }  // namespace xla

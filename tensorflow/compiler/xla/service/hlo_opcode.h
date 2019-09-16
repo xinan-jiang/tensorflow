@@ -79,6 +79,7 @@ namespace xla {
   V(kCopyStart, "copy-start", 1)                                       \
   V(kCos, "cosine", 1)                                                 \
   V(kCustomCall, "custom-call", kHloOpcodeIsVariadic)                  \
+  V(kDiagSlice, "diag-slice", 1)                                       \
   V(kDivide, "divide", 2)                                              \
   V(kDomain, "domain", 1)                                              \
   V(kDot, "dot", 2)                                                    \

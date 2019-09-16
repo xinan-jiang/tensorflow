@@ -203,6 +203,27 @@ IrArray::Index IrArray::Index::SourceIndexOfSlice(
   return Index(source_multi_index, operand_shape, index_type_);
 }
 
+IrArray::Index IrArray::Index::SourceIndexOfDiagSlice(
+    const Shape& operand_shape, const int64 offset,
+    llvm::IRBuilder<>* builder) const {
+  std::vector<llvm::Value*> source_multi_index;
+  int64 out_dim_num = multidim_.size();
+  source_multi_index.reserve(out_dim_num + 1);
+
+  absl::c_copy(absl::MakeSpan(multidim_).subspan(0, out_dim_num - 1),
+      std::back_inserter(source_multi_index));
+
+  llvm::Type* type = multidim_[0]->getType();
+  llvm::Value* row = builder->CreateAdd(multidim_.back(),
+      llvm::ConstantInt::get(type, std::max(-offset, 0LL)));
+  llvm::Value* col = builder->CreateAdd(multidim_.back(),
+      llvm::ConstantInt::get(type, std::max(offset, 0LL)));
+  source_multi_index.push_back(row);
+  source_multi_index.push_back(col);
+
+  return Index(source_multi_index, operand_shape, index_type_);
+}
+
 IrArray::Index IrArray::Index::SourceIndexOfTranspose(
     const Shape& shape, const Shape& operand_shape,
     absl::Span<const int64> dimension_mapping,

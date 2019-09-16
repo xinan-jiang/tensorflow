@@ -689,6 +689,13 @@ Status ShapeVerifier::HandleSlice(HloInstruction* slice) {
                         slice->slice_limits(), slice->slice_strides()));
 }
 
+Status ShapeVerifier::HandleDiagSlice(HloInstruction* diag_slice) {
+  return CheckShape(
+      diag_slice,
+      ShapeInference::InferDiagSliceShape(diag_slice->operand(0)->shape(),
+          Cast<HloDiagSliceInstruction>(diag_slice)->offset()));
+}
+
 Status ShapeVerifier::HandleDynamicSlice(HloInstruction* dynamic_slice) {
   return CheckShape(
       dynamic_slice,

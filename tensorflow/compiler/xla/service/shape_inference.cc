@@ -20,6 +20,8 @@ limitations under the License.
 #include <numeric>
 #include <set>
 #include <string>
+#include <utility>
+#include <limits>
 
 #include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_set.h"
@@ -2270,6 +2272,30 @@ ShapeInference::InferDegenerateDimensionBroadcastShape(HloOpcode operation,
     dim->set_window_reversal(false);
   }
   return window;
+}
+
+/* static */ StatusOr<Shape> ShapeInference::InferDiagSliceShape(
+    const Shape& shape, int64 offset) {
+  TF_RETURN_IF_ERROR(
+      ExpectArray(shape, "operand of diag-slice"));
+  // Make sure the input is at least a matrix
+  int64 rank = shape.rank();
+  if (rank < 2) {
+    return InvalidArgument(
+        "DiagSlice function's input must be at least a matrix; got an array.");
+  }
+
+  std::vector<int64> new_dimensions;
+  new_dimensions.reserve(rank - 1);
+  absl::c_copy(shape.dimensions().subspan(0, rank - 2),
+               std::back_inserter(new_dimensions));
+
+  const int32 diag_length =
+    std::min(shape.dimensions(rank - 2) + std::min(offset, 0LL),
+             shape.dimensions(rank - 1) - std::max(offset, 0LL));
+  new_dimensions.push_back(diag_length);
+
+  return ShapeUtil::MakeShape(shape.element_type(), new_dimensions);
 }
 
 /* static */ StatusOr<Shape> ShapeInference::InferSliceShape(

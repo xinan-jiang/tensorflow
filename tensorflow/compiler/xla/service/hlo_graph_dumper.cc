@@ -1001,6 +1001,7 @@ ColorScheme HloDotDumper::GetInstructionColor(const HloInstruction* instr) {
       }
       return kGreen;
     case HloOpcode::kConcatenate:
+    case HloOpcode::kDiagSlice:
     case HloOpcode::kDynamicSlice:
     case HloOpcode::kGather:
     case HloOpcode::kPad:

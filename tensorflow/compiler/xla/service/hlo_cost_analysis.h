@@ -101,6 +101,7 @@ class HloCostAnalysis : public ConstDfsHloVisitor {
   Status HandleDynamicSlice(const HloInstruction* dynamic_slice) override;
   Status HandleDynamicUpdateSlice(
       const HloInstruction* dynamic_update_slice) override;
+  Status HandleDiagSlice(const HloInstruction* diag_slice) override;
   Status HandleTuple(const HloInstruction* tuple) override;
   Status HandleMap(const HloInstruction* map) override;
   Status HandleReduceWindow(const HloInstruction* reduce_window) override;

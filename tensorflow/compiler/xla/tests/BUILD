@@ -1306,6 +1306,22 @@ xla_test(
 )
 
 xla_test(
+    name = "diag_slice_test",
+    srcs = ["diag_slice_test.cc"],
+    deps = [
+        ":client_library_test_base",
+        ":literal_test_util",
+        ":test_macros_header",
+        ":xla_internal_test_main",
+        "//tensorflow/compiler/xla:array2d",
+        "//tensorflow/compiler/xla:array3d",
+        "//tensorflow/compiler/xla/client:xla_builder",
+        "//tensorflow/core:test",
+        "@com_google_absl//absl/container:inlined_vector",
+    ],
+)
+
+xla_test(
     name = "multidimensional_slice_test",
     srcs = ["multidimensional_slice_test.cc"],
     deps = [

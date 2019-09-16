@@ -242,6 +242,7 @@ class DfsHloVisitorBase {
   virtual Status HandleSlice(HloInstructionPtr hlo) = 0;
   virtual Status HandleDynamicSlice(HloInstructionPtr hlo) = 0;
   virtual Status HandleDynamicUpdateSlice(HloInstructionPtr hlo) = 0;
+  virtual Status HandleDiagSlice(HloInstructionPtr hlo) = 0;
   virtual Status HandleTuple(HloInstructionPtr hlo) = 0;
   virtual Status HandleMap(HloInstructionPtr hlo) = 0;
   virtual Status HandleReduceWindow(HloInstructionPtr hlo) = 0;

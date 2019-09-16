@@ -2822,4 +2822,40 @@ HloRngGetAndUpdateStateInstruction::CloneWithNewOperandsImpl(
   return absl::make_unique<HloRngGetAndUpdateStateInstruction>(shape, delta());
 }
 
+HloDiagSliceInstruction::HloDiagSliceInstruction(
+    const Shape& shape, HloInstruction* operand, int64 offset)
+    : HloInstruction(HloOpcode::kDiagSlice, shape), offset_(offset) {
+  AppendOperand(operand);
+}
+
+HloInstructionProto HloDiagSliceInstruction::ToProto() const {
+  HloInstructionProto proto = HloInstruction::ToProto();
+  proto.set_offset(offset_);
+  return proto;
+}
+
+std::vector<string>
+HloDiagSliceInstruction::ExtraAttributesToStringImpl(
+    const HloPrintOptions& /*options*/) const {
+  return {StrCat("offset={", offset(), "}")};
+}
+
+bool HloDiagSliceInstruction::IdenticalSlowPath(
+    const HloInstruction& other,
+    const std::function<bool(const HloComputation*, const HloComputation*)>&
+    /*eq_computations*/) const {
+  const auto& casted_other =
+      static_cast<const HloDiagSliceInstruction&>(other);
+  return offset() == casted_other.offset();
+}
+
+std::unique_ptr<HloInstruction>
+HloDiagSliceInstruction::CloneWithNewOperandsImpl(
+    const Shape& shape, absl::Span<HloInstruction* const> new_operands,
+    HloCloneContext* /*context*/) const {
+  CHECK_EQ(new_operands.size(), 1);
+  return absl::make_unique<HloDiagSliceInstruction>(
+      shape, new_operands[0], offset());
+}
+
 }  // namespace xla

@@ -16,6 +16,8 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_XLA_SERVICE_DFS_HLO_VISITOR_WITH_DEFAULT_H_
 #define TENSORFLOW_COMPILER_XLA_SERVICE_DFS_HLO_VISITOR_WITH_DEFAULT_H_
 
+#include <utility>
+
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "tensorflow/compiler/xla/literal.h"
@@ -159,6 +161,9 @@ class DfsHloVisitorWithDefaultBase
   Status HandleDynamicUpdateSlice(
       HloInstructionPtr dynamic_update_slice) override {
     return DefaultAction(dynamic_update_slice);
+  }
+  Status HandleDiagSlice(HloInstructionPtr diag_slice) override {
+    return DefaultAction(diag_slice);
   }
   Status HandleTuple(HloInstructionPtr tuple) override {
     return DefaultAction(tuple);

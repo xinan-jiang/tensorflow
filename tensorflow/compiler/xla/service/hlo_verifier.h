@@ -81,6 +81,7 @@ class ShapeVerifier : public DfsHloVisitor {
   Status HandleDynamicSlice(HloInstruction* dynamic_slice) override;
   Status HandleDynamicUpdateSlice(
       HloInstruction* dynamic_update_slice) override;
+  Status HandleDiagSlice(HloInstruction* diag_slice) override;
   Status HandleTuple(HloInstruction* tuple) override;
   Status HandleMap(HloInstruction* map) override;
   Status HandleReduceWindow(HloInstruction* reduce_window) override;

@@ -838,6 +838,12 @@ Status HloCostAnalysis::HandleGetDimensionSize(
   return Status::OK();
 }
 
+Status HloCostAnalysis::HandleDiagSlice(const HloInstruction* diag_slice) {
+  current_properties_[kBytesAccessedKey] =
+      GetShapeSize(diag_slice->shape()) * 2;
+  return Status::OK();
+}
+
 Status HloCostAnalysis::FinishVisit(const HloInstruction*) {
   return Status::OK();
 }

@@ -146,7 +146,7 @@ class DiagPartOp : public XlaOpKernel {
     xla::XlaOp input = ctx->Input(0);
 
     xla::XlaOp output = xla::Reshape(
-        xla::GetMatrixDiagonal(xla::Reshape(input, {new_size, new_size})),
+        xla::DiagSlice(xla::Reshape(input, {new_size, new_size})),
         new_dims);
 
     ctx->SetOutput(0, output);

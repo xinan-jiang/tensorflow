@@ -315,13 +315,13 @@ class MatrixDiagPartOp : public XlaOpKernel {
     std::vector<xla::XlaOp> diag_list;
     xla::PaddingConfig padding_config;
     if (num_diags == 1) {
-      context->SetOutput(0, xla::GetMatrixDiagonal(input, upper_diag_index));
+      context->SetOutput(0, xla::DiagSlice(input, upper_diag_index));
       return;
     }
     padding_config = xla::MakeNoPaddingConfig(input_rank - 1);
     for (int diag_index = upper_diag_index; diag_index >= lower_diag_index;
          --diag_index) {
-      auto single_diag = xla::GetMatrixDiagonal(input, diag_index);
+      auto single_diag = xla::DiagSlice(input, diag_index);
       const int64 diag_length =
           (diag_index >= 0) ? (num_cols - diag_index) : (num_rows + diag_index);
       const int64 padding_length = max_diag_len - diag_length;

@@ -24,6 +24,8 @@ def tf_xla_py_test(
         main = None,
         enabled_backends = None,
         disabled_backends = None,
+        cpu_test_types = None,
+        gpu_test_types = None,
         use_xla_device = True,
         **kwargs):
     """Generates py_test targets, one per XLA backend.
@@ -51,6 +53,14 @@ def tf_xla_py_test(
         values include "cpu" and "gpu". If not specified, defaults to None.
       disabled_backends: A list of backends that should not be tested. Supported
         values include "cpu" and "gpu". If not specified, defaults to None.
+      cpu_test_types: A list of data type that should be tested on CPU. If not
+        specified, defaults to
+        "DT_HALF,DT_FLOAT,DT_DOUBLE,DT_UINT8,DT_QUINT8,DT_INT8,DT_QINT8,DT_INT32,
+        DT_QINT32,DT_INT64,DT_BOOL,DT_COMPLEX64,DT_COMPLEX128".
+      gpu_test_types: A list of data type that should be tested on GPU. If not
+        specified, defaults to
+        "DT_HALF,DT_FLOAT,DT_DOUBLE,DT_UINT8,DT_QUINT8,DT_INT8,DT_QINT8,DT_INT32,
+        DT_QINT32,DT_INT64,DT_BOOL,DT_COMPLEX64,DT_COMPLEX128,DT_BFLOAT16"
       use_xla_device: If true then the --test_device argument is set to XLA_CPU
         and XLA_GPU for the CPU and GPU tests.  Otherwise it is set to CPU and
         GPU.
@@ -73,6 +83,11 @@ def tf_xla_py_test(
         cpu_xla_device = "CPU"
         gpu_xla_device = "GPU"
 
+    if cpu_test_types == None:
+        cpu_test_types = "DT_HALF,DT_FLOAT,DT_DOUBLE,DT_UINT8,DT_QUINT8,DT_INT8,DT_QINT8,DT_INT32,DT_QINT32,DT_INT64,DT_BOOL,DT_COMPLEX64,DT_COMPLEX128"
+    if gpu_test_types == None:
+        gpu_test_types = "DT_HALF,DT_FLOAT,DT_DOUBLE,DT_UINT8,DT_QUINT8,DT_INT8,DT_QINT8,DT_INT32,DT_QINT32,DT_INT64,DT_BOOL,DT_COMPLEX64,DT_COMPLEX128,DT_BFLOAT16"
+
     for backend in backends:
         test_name = "{}_{}".format(name, backend)
         backend_tags = ["tf_xla_{}".format(backend)]
@@ -82,12 +97,12 @@ def tf_xla_py_test(
         if backend == "cpu":
             backend_args += [
                 "--test_device=" + cpu_xla_device,
-                "--types=DT_HALF,DT_FLOAT,DT_DOUBLE,DT_UINT8,DT_QUINT8,DT_INT8,DT_QINT8,DT_INT32,DT_QINT32,DT_INT64,DT_BOOL,DT_COMPLEX64,DT_COMPLEX128",
+                "--types=" + cpu_test_types,
             ]
         elif backend == "gpu":
             backend_args += [
                 "--test_device=" + gpu_xla_device,
-                "--types=DT_HALF,DT_FLOAT,DT_DOUBLE,DT_UINT8,DT_QUINT8,DT_INT8,DT_QINT8,DT_INT32,DT_QINT32,DT_INT64,DT_BOOL,DT_COMPLEX64,DT_COMPLEX128,DT_BFLOAT16",
+                "--types=" + gpu_test_types,
             ]
             backend_tags += tf_cuda_tests_tags()
         elif backend in plugins:

@@ -197,6 +197,11 @@ class ShapeInference {
       absl::Span<const Shape> start_index_shapes,
       bool allow_scalar_indices = true);
 
+  // Infers the shape produced by a diagonal slice operation which returns a
+  // tensor with the diagonal part of the batched input. The input must be at
+  // least a matrix.
+  static StatusOr<Shape> InferDiagSliceShape(const Shape& shape, int64 offset);
+
   // Infers the shape produced by doing a compile-time-constant indexing into
   // the given input shape. This is essential for operations on tuples, because
   // it is impossible to infer the type that comes out of the tuple indexing if

@@ -524,6 +524,21 @@ tf_xla_py_test(
 )
 
 tf_xla_py_test(
+    name = "diag_slice_ops_test",
+    size = "small",
+    srcs = ["diag_slice_ops_test.py"],
+    cpu_test_types =
+        "DT_HALF,DT_FLOAT,DT_DOUBLE,DT_INT32,DT_QINT32,DT_INT64,DT_BOOL,DT_COMPLEX64,DT_COMPLEX128",
+    gpu_test_types =
+        "DT_HALF,DT_FLOAT,DT_DOUBLE,DT_INT32,DT_QINT32,DT_INT64,DT_BOOL,DT_COMPLEX64,DT_COMPLEX128,DT_BFLOAT16",
+    deps = [
+        ":xla_test",
+        "//tensorflow/python:array_ops",
+        "//tensorflow/python:platform_test",
+    ],
+)
+
+tf_xla_py_test(
     name = "ftrl_test",
     size = "medium",
     srcs = ["ftrl_test.py"],
