@@ -19,6 +19,8 @@ limitations under the License.
 #include <limits>
 #include <numeric>
 #include <vector>
+#include <utility>
+#include <algorithm>
 
 #include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_set.h"
@@ -77,28 +79,58 @@ XlaOp GetMatrixDiagonal(XlaOp x, int k) {
     const int64 m = shape.dimensions(n_dims - 2);
     const int64 n = shape.dimensions(n_dims - 1);
 
-    if (k <= -m || k >= n) {
-      auto zero_size_shape = shape;
-      zero_size_shape.DeleteDimension(n_dims - 1);
-      zero_size_shape.set_dimensions(n_dims - 2, 0);
-      return ConstantLiteral(builder, Literal{zero_size_shape});
-    }
-    auto mask = GetDiagonalMask(x, k);
+    // The start_indices has a shape of {diag_len, 2}, and each pair of value in
+    // its dimension 1 represents the (row, col) of the diagonal. We set
+    // index_vector_dim to 1 and make start_index_map and collapsed_slice_dims
+    // contain the same two dimension indices. This makes sure that the (row,
+    // col) pairs in start_indices are propagated to the indices for the two
+    // collapsed dimensions in the operand indices through start_index_map.
+    const int64 num_index_dims = 2;
+    const int64 axis = n_dims - num_index_dims;
 
-    int64 reduce_dim = n_dims - 1;
-    if ((k == 0 && m >= n) || k < 0) {
-      reduce_dim = n_dims - 2;
+    // Calculate the indices of diagonal part with offset k.
+    const int64 diag_len = std::max(std::min(m + std::min(k, 0),
+                                             n - std::max(k, 0)),
+                                    0LL);
+    XlaOp diag_base_indices = BroadcastInDim(
+        Iota(builder, S32, diag_len), { diag_len, num_index_dims }, { 0 });
+    XlaOp diag_offset = Broadcast(
+        ConstantR1<int>(builder, { std::max(-k, 0), std::max(k, 0) }),
+        { diag_len });
+    XlaOp start_indices = Add(diag_base_indices, diag_offset);
+
+    // Example of a 3D diag-part extracting diagonal part with offset=1 out of a
+    // tensor of shape [2,5,4].
+    //
+    //  operand = s32[2,5,4] parameter(0)
+    //  indices = s32[3,2] parameter(1)
+    //  gather = s32[2,3] gather(operand, indices),
+    //       offset_dims={0},
+    //       collapsed_slice_dims={1,2},
+    //       start_index_map={1,2},
+    //       index_vector_dim=1,
+    //       slice_sizes={2, 1, 1}
+
+    xla::GatherDimensionNumbers dim_numbers;
+    std::vector<int64> slice_sizes;
+    slice_sizes.reserve(n_dims);
+    for (int64 i = 0; i < n_dims; i++) {
+      int64 window_bound;
+      if (axis <= i) {
+        dim_numbers.add_collapsed_slice_dims(i);
+        dim_numbers.add_start_index_map(i);
+        window_bound = 1;
+      } else {
+        dim_numbers.add_offset_dims(i);
+        window_bound = shape.dimensions(i);
+      }
+      slice_sizes.push_back(window_bound);
     }
-    auto result = Reduce(
-        Select(mask, x, Zeros(builder, shape)), ScalarLike(x, 0),
-        CreateScalarIdentityWithZeroComputation(shape.element_type(), builder),
-        {reduce_dim});
-    // k == 0, we can save one slice op.
-    if (k == 0) {
-      return result;
-    }
-    return SliceInMinorDims(result, {0},
-                            {k > 0 ? std::min(m, n - k) : std::min(n, m + k)});
+
+    dim_numbers.set_index_vector_dim(1);
+
+    return Gather(x, start_indices, dim_numbers, slice_sizes,
+                  /*indices_are_sorted=*/true);
   });
 }
 
